@@ -148,6 +148,31 @@ An agent that can run commands on your PC installs it for you and checks that it
 
 ---
 
+## 🧹 Uninstall
+
+Pick whichever is easiest. Each one removes the app completely:
+
+| Way | How |
+|---|---|
+| **Windows Settings** | *Settings → Apps → Installed apps*, find **Taskbar Widgets**, click **⋯ → Uninstall** |
+| **Start menu** | Open *Start → All apps → Taskbar Widgets → **Uninstall Taskbar Widgets*** |
+| **PowerShell, one line** | `& ([scriptblock]::Create((irm https://raw.githubusercontent.com/W1nOfGood/taskbar-widgets/main/install.ps1))) -Uninstall` |
+| **Ask an AI** | Tell your assistant: *"Uninstall Taskbar Widgets. Instructions: https://raw.githubusercontent.com/W1nOfGood/taskbar-widgets/main/AGENTS.md"* |
+
+What the uninstaller does:
+- **Closes the widgets properly first**, so any music volume they had lowered goes back to where you set it
+- Removes the app, its shortcuts, its *Start with Windows* entries and its *Installed apps* entry
+- Removes **only files it installed**: anything else you put in that folder is left alone
+- **Keeps your settings** unless you tick *Also delete my settings* in the uninstaller (or add `-DeleteSettings` to the PowerShell line). Reinstall later and everything is how you left it.
+
+<details>
+<summary><b>Using the portable zip instead?</b></summary>
+
+There's nothing to uninstall. Right-click each widget → **Settings** → turn off *Start with Windows*, then right-click → **Exit**, and delete the folder. Delete `%APPDATA%\TaskbarWidgets` too if you want the settings gone.
+</details>
+
+---
+
 ## 🖱️ Using it
 
 | Action | Battery widget | Volume & Media widget |
@@ -320,7 +345,7 @@ Only to check for updates: one request a day to the GitHub API (`api.github.com/
 <details>
 <summary><b>How do I remove it?</b></summary>
 
-Turn off *Start with Windows*, exit from the right-click menu, and delete the folder (plus `%APPDATA%\TaskbarWidgets` if you want the settings gone too).
+Use *Settings → Apps → Installed apps → Taskbar Widgets → Uninstall*. All the ways to remove it are under [Uninstall](#-uninstall).
 </details>
 
 ---
