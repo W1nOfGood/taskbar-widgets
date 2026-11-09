@@ -216,9 +216,35 @@ namespace TaskbarWidgets
         {
             using (var k = Registry.CurrentUser.CreateSubKey(RunKey))
             {
-                if (on) k.SetValue(name, "\"" + Process.GetCurrentProcess().MainModule.FileName + "\"");
+                if (on) k.SetValue(name, Command);
                 else if (k.GetValue(name) != null) k.DeleteValue(name);
             }
+        }
+
+        static string Command { get { return "\"" + Process.GetCurrentProcess().MainModule.FileName + "\""; } }
+
+        /// <summary>
+        /// Start with Windows is on by default: turned on the first time the app runs (only then, so turning it
+        /// off sticks). If the folder was moved, the startup entry is pointed at the new location.
+        /// </summary>
+        public static void EnsureDefault(Settings s, string name)
+        {
+            if (Demo.On || Environment.GetEnvironmentVariable("TW_FAKE_VERSION") != null) return;
+            try
+            {
+                if (!s.Bool("startupInit", false))
+                {
+                    s.Set("startupInit", true);
+                    Set(name, true);
+                    return;
+                }
+                using (var k = Registry.CurrentUser.OpenSubKey(RunKey))
+                {
+                    var v = k == null ? null : k.GetValue(name) as string;
+                    if (v != null && !string.Equals(v, Command, StringComparison.OrdinalIgnoreCase)) Set(name, true);
+                }
+            }
+            catch { }
         }
     }
 }

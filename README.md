@@ -91,7 +91,7 @@ Two tiny native widgets that sit side by side, never cover your icons, and use a
 1. Download **`TaskbarWidgets.zip`** from the [latest release](https://github.com/W1nOfGood/taskbar-widgets/releases/latest).
 2. Extract it anywhere (for example `C:\Tools\TaskbarWidgets`). Keep both `.exe` files in the same folder.
 3. Run **`BatteryWidget.exe`** and/or **`VolumeMediaWidget.exe`**.
-4. Optional: right-click a widget → **Settings** → **Start with Windows**.
+4. That's it: they **start with Windows automatically** from now on (turn it off in **General → Behavior → Start with Windows**).
 
 > [!NOTE]
 > The apps aren't code-signed, so Windows SmartScreen may warn on first launch. Click **More info → Run anyway**, or build them yourself from source (one command, below).

@@ -176,6 +176,7 @@ namespace TaskbarWidgets
             Render();
             RequestScan();
             new Updater(this).Start();
+            Startup.EnsureDefault(S, Slot == 0 ? "TaskbarWidgets.Battery" : "TaskbarWidgets.Volume");
             string updated = Updater.UpdatedTo(Environment.GetCommandLineArgs());
             if (updated != null)
                 Notify("Taskbar Widgets updated to " + updated, "Click to see what's new.", () => Updater.Instance.OpenPage());

@@ -10,14 +10,14 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-[assembly: System.Reflection.AssemblyVersion("1.1.0.0")]
+[assembly: System.Reflection.AssemblyVersion("1.1.1.0")]
 [assembly: System.Reflection.AssemblyTitle("Taskbar Widgets")]
 
 namespace TaskbarWidgets
 {
     internal static class AppInfo
     {
-        public const string Version = "1.1.0";
+        public const string Version = "1.1.1";
         public const string Repo = "W1nOfGood/taskbar-widgets";
         public const string ZipName = "TaskbarWidgets.zip";
         public static readonly string[] Exes = { "BatteryWidget.exe", "VolumeMediaWidget.exe" };
@@ -121,13 +121,19 @@ namespace TaskbarWidgets
             Latest = tag.Groups[1].Value.TrimStart('v', 'V');
             PageUrl = "https://github.com/" + AppInfo.Repo + "/releases/tag/" + tag.Groups[1].Value;
             zipUrl = null; zipSha = null;
-            // find the asset object that holds our zip
-            foreach (Match m in Regex.Matches(json, "\\{[^{}]*\"name\"\\s*:\\s*\"" + Regex.Escape(AppInfo.ZipName) + "\"[^{}]*\\}"))
+            // Our zip's asset: from its "name" to its "browser_download_url" (the asset's last field). The asset object
+            // contains a nested "uploader" object, so it can't be matched as one flat {...} block.
+            var nm = Regex.Match(json, "\"name\"\\s*:\\s*\"" + Regex.Escape(AppInfo.ZipName) + "\"");
+            if (nm.Success)
             {
-                var u = Regex.Match(m.Value, "\"browser_download_url\"\\s*:\\s*\"([^\"]+)\"");
-                var d = Regex.Match(m.Value, "\"digest\"\\s*:\\s*\"sha256:([0-9a-fA-F]{64})\"");
-                if (u.Success) zipUrl = u.Groups[1].Value;
-                if (d.Success) zipSha = d.Groups[1].Value.ToLowerInvariant();
+                string rest = json.Substring(nm.Index);
+                var u = Regex.Match(rest, "\"browser_download_url\"\\s*:\\s*\"([^\"]+)\"");
+                if (u.Success)
+                {
+                    zipUrl = u.Groups[1].Value;
+                    var d = Regex.Match(rest.Substring(0, u.Index), "\"digest\"\\s*:\\s*\"sha256:([0-9a-fA-F]{64})\"");
+                    if (d.Success) zipSha = d.Groups[1].Value.ToLowerInvariant();
+                }
             }
             Available = Newer(Latest, AppInfo.Current) && zipUrl != null &&
                         zipUrl.StartsWith("https://github.com/" + AppInfo.Repo + "/releases/download/", StringComparison.OrdinalIgnoreCase);
