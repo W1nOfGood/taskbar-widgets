@@ -99,8 +99,13 @@ namespace TaskbarWidgets.Volume
             {
                 NowPlaying np;
                 if (PinnedAppId != null && sessions.TryGetValue(PinnedAppId, out np)) return np;
+                // A music app (Spotify, Apple Music...) is "the music" even when a lecture/video plays in a browser
+                var music = sessions.Values.FirstOrDefault(s => s.Playing && IsMusicApp(s.AppId));
+                if (music != null) return music;
                 var playing = sessions.Values.FirstOrDefault(s => s.Playing);
                 if (playing != null) return playing;
+                var pausedMusic = sessions.Values.FirstOrDefault(s => IsMusicApp(s.AppId));
+                if (pausedMusic != null) return pausedMusic;
                 try
                 {
                     var cur = mgr == null ? null : mgr.GetCurrentSession();
@@ -258,6 +263,18 @@ namespace TaskbarWidgets.Volume
         }
 
         // ---------------------------------------------------------------- app names & icons
+
+        static readonly string[] musicApps = {
+            "spotify", "applemusic", "itunes", "zunemusic", "amazonmusic", "amazon.music", "deezer", "tidal", "qobuz", "pandora",
+            "soundcloud", "ytmdesktop", "youtube-music", "youtubemusic", "foobar2000", "musicbee", "aimp", "winamp", "dopamine",
+            "plexamp", "cider", "audacious", "clementine", "strawberry", "nuclear", "musescore", "napster", "anghami", "joox", "line music" };
+
+        /// <summary>Dedicated music players (not browsers or video players).</summary>
+        public static bool IsMusicApp(string aumid)
+        {
+            string a = (aumid ?? "").ToLowerInvariant();
+            return musicApps.Any(m => a.Contains(m));
+        }
 
         static string FriendlyApp(string aumid)
         {

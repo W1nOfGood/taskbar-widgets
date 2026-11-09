@@ -20,6 +20,7 @@ namespace TaskbarWidgets.Volume
         readonly Control ui;
         readonly Settings S;
         readonly Func<NowPlaying> current;
+        readonly Func<List<NowPlaying>> allMedia;
         List<AppSession> live = new List<AppSession>();
         bool busy;
         readonly Timer refresh = new Timer { Interval = 4000 };
@@ -30,15 +31,15 @@ namespace TaskbarWidgets.Volume
         float baseVol = 1f;       // the user's volume for it (what we restore to)
         float factor = 1f;        // current multiplier (1 = not lowered)
         float lastSet = -1f;      // what we last wrote, to notice the user changing it meanwhile
-        DateTime lastTalk = DateTime.MinValue;
+        DateTime lastTalk = DateTime.MinValue, lastVideo = DateTime.MinValue;
 
         static readonly string[] voiceApps = {
             "discord", "discordptb", "discordcanary", "vesktop", "ms-teams", "teams", "zoom", "slack", "skype", "telegram",
             "whatsapp", "signal", "mumble", "ts3client_win64", "ts3client_win32", "teamspeak", "webex", "ciscocollabhost", "guilded", "element", "ventrilo" };
 
-        public AppAudio(Control ui, Settings s, Func<NowPlaying> current)
+        public AppAudio(Control ui, Settings s, Func<NowPlaying> current, Func<List<NowPlaying>> allMedia)
         {
-            this.ui = ui; S = s; this.current = current;
+            this.ui = ui; S = s; this.current = current; this.allMedia = allMedia;
             refresh.Tick += (o, e) => Refresh();
             duckTimer.Tick += (o, e) => DuckTick();
         }
@@ -60,8 +61,8 @@ namespace TaskbarWidgets.Volume
                 var mu = Music;
                 Log.Info("volume", "sessions: " + string.Join(" | ", live.Select(x => x.Name + " [" + Path.GetFileName(x.ExePath ?? "") + "]")) +
                          " || media app=" + (np == null ? "-" : np.AppId) + " -> music=" + (mu == null ? "none" : mu.Name) +
-                         " || voice=" + string.Join(",", Voice.Select(x => x.Name)));
-                bool needDuck = S.Bool("duck", true) && Voice.Count > 0 && mu != null || duckKey != null;
+                         " || voice=" + string.Join(",", Voice.Select(x => x.Name)) + " || video=" + string.Join(",", Videos.Select(x => x.Name)));
+                bool needDuck = mu != null && (S.Bool("duck", true) && Voice.Count > 0 || S.Bool("duckVideo", true) && Videos.Count > 0) || duckKey != null;
                 if (needDuck && !duckTimer.Enabled) duckTimer.Start();
                 if (!needDuck && duckTimer.Enabled) duckTimer.Stop();
                 if (Changed != null) Changed();
@@ -114,6 +115,25 @@ namespace TaskbarWidgets.Volume
 
         public List<AppSession> Voice { get { return live.Where(IsVoice).ToList(); } }
 
+        /// <summary>Audio sessions of other media that is playing (a lecture or video in a browser, a video player...).</summary>
+        public List<AppSession> Videos
+        {
+            get
+            {
+                var music = current();
+                var res = new List<AppSession>();
+                if (music == null) return res;
+                var musicSession = Music;
+                foreach (var np in allMedia())
+                {
+                    if (!np.Playing || np.AppId == music.AppId || MediaManager.IsMusicApp(np.AppId)) continue;
+                    foreach (var s in live)
+                        if (Matches(s, np.AppId) && (musicSession == null || s.Key != musicSession.Key) && !res.Contains(s)) res.Add(s);
+                }
+                return res;
+            }
+        }
+
         // ---------------------------------------------------------------- user volume changes
 
         /// <summary>The music app's volume as the user set it (ignores our temporary ducking).</summary>
@@ -141,20 +161,28 @@ namespace TaskbarWidgets.Volume
         void DuckTick()
         {
             var music = Music;
-            var voice = Voice;
             var np = current();
-            bool enabled = S.Bool("duck", true) && music != null && voice.Count > 0 && !IsVoice(music);
-            if (!enabled || (duckKey != null && music != null && duckKey != music.Key)) { Restore(); if (!enabled) duckTimer.Stop(); return; }
+            var voice = S.Bool("duck", true) ? Voice : new List<AppSession>();
+            var videos = S.Bool("duckVideo", true) ? Videos : new List<AppSession>();
+            bool enabled = music != null && !IsVoice(music) && (S.Bool("duck", true) || S.Bool("duckVideo", true));
+            // hard stop only when the music app changed or the feature is off; a source disappearing just fades back up
+            if (!enabled || (duckKey != null && duckKey != music.Key)) { Restore(); if (!enabled) duckTimer.Stop(); return; }
+            if (voice.Count == 0 && videos.Count == 0 && duckKey == null) { duckTimer.Stop(); return; } // nothing to do; Refresh restarts us
 
+            bool musicPlaying = np != null && np.Playing;
             float peak = 0;
             foreach (var v in voice) peak = Math.Max(peak, v.LivePeak());
-            if (peak > 0.02f && np != null && np.Playing) lastTalk = DateTime.Now;
-            bool talking = (DateTime.Now - lastTalk).TotalMilliseconds < 1300;
+            if (peak > 0.02f && musicPlaying) lastTalk = DateTime.Now;
+            // lectures/videos: hold longer so short pauses between sentences don't pump the music up and down
+            float vpeak = 0;
+            foreach (var v in videos) vpeak = Math.Max(vpeak, v.LivePeak());
+            if (vpeak > 0.015f && musicPlaying) lastVideo = DateTime.Now;
+            bool talking = (DateTime.Now - lastTalk).TotalMilliseconds < 1300 || (DateTime.Now - lastVideo).TotalMilliseconds < 4000;
             float amount = Math.Max(0.1f, Math.Min(0.95f, S.Int("duckAmount", 60) / 100f));
             float target = talking ? 1f - amount : 1f;
             if (duckKey == null && target >= 1f) return; // idle
 
-            if (duckKey == null) { duckKey = music.Key; baseVol = music.LiveVolume(); factor = 1f; lastSet = -1f; }
+            if (duckKey == null) { duckKey = music.Key; baseVol = music.LiveVolume(); factor = 1f; lastSet = -1f; Log.Info("volume", "duck start: " + music.Name + " base=" + baseVol); }
             float cur = music.LiveVolume();
             // the user moved the app's slider (e.g. in the Windows mixer) while lowered: adopt it
             if (lastSet >= 0 && Math.Abs(cur - lastSet) > 0.02f) baseVol = Math.Min(1f, cur / Math.Max(0.05f, factor));
@@ -163,7 +191,7 @@ namespace TaskbarWidgets.Volume
             if (Math.Abs(factor - target) < 0.01f) factor = target;
             lastSet = baseVol * factor;
             music.SetVolume(lastSet);
-            if (factor >= 1f) { duckKey = null; lastSet = -1f; }
+            if (factor >= 1f) { duckKey = null; lastSet = -1f; Log.Info("volume", "duck end: restored " + baseVol); }
         }
 
         /// <summary>Puts a lowered app back to the user's volume (music app changed, feature turned off, app exit).</summary>

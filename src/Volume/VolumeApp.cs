@@ -41,7 +41,7 @@ namespace TaskbarWidgets.Volume
         {
             Audio = new Audio();
             Media = new MediaManager(this);
-            Apps = new AppAudio(this, S, () => Media.Current);
+            Apps = new AppAudio(this, S, () => Media.Current, () => Media.All);
             Apps.Changed += () => Poll();
             string lastApp = null;
             Media.Changed += () =>
@@ -596,15 +596,22 @@ namespace TaskbarWidgets.Volume
                 v => vw.SetVolume((int)Math.Round(v * 100)), vw.ToggleMute);
             ui.EndCard();
 
-            ui.Section("Voice chat");
+            ui.Section("Auto-lower music");
             ui.BeginCard();
-            ui.Toggle("Lower music while people talk", "When someone speaks in Discord, Teams, Zoom, Slack, TeamSpeak, Mumble... the music fades down, then back up. Games are not touched.",
-                S.Bool("duck", true), v => { S.Set("duck", v); if (!v) vw.Apps.Restore(); vw.Apps.Refresh(); });
-            if (S.Bool("duck", true))
+            ui.Toggle("While people talk in voice chat", "Discord, Teams, Zoom, Slack, TeamSpeak, Mumble... The music fades down, then back up. Games are not touched.",
+                S.Bool("duck", true), v => { S.Set("duck", v); vw.Apps.Restore(); vw.Apps.Refresh(); });
+            ui.Toggle("While a lecture or video plays", "A course, YouTube or a video player in your browser keeps its volume; only the music app is lowered.",
+                S.Bool("duckVideo", true), v => { S.Set("duckVideo", v); vw.Apps.Restore(); vw.Apps.Refresh(); });
+            if (S.Bool("duck", true) || S.Bool("duckVideo", true))
                 ui.Slider("Lower music by", null, S.Int("duckAmount", 60), 20, 90, "%", v => S.Set("duckAmount", v));
             var voice = vw.Apps.Voice;
-            ui.Label(voice.Count == 0 ? "No voice chat app is playing audio right now." : "Voice chat detected: " + string.Join(", ", voice.Select(x => x.Name).Distinct()),
-                F.Small, voice.Count == 0 ? T.Faint : T.Good);
+            var videos = vw.Apps.Videos;
+            var music = vw.Apps.Music;
+            string status = music == null ? "No music app is playing." : "Music: " + music.Name;
+            if (Demo.On) status = "Music: Spotify  ·  Video: Browser";
+            if (voice.Count > 0) status += "  \u00B7  Voice: " + string.Join(", ", voice.Select(x => x.Name).Distinct());
+            if (videos.Count > 0) status += "  \u00B7  Video: " + string.Join(", ", videos.Select(x => x.Name).Distinct());
+            ui.Label(status, F.Small, music == null && !Demo.On ? T.Faint : T.Good);
             ui.EndCard();
 
             ui.Section("Apps");

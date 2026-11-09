@@ -50,6 +50,7 @@ Two tiny native widgets that sit side by side, never cover your icons, and use a
 - Album art, seekable timeline, switch between players
 - **Scroll changes only the music app**, so your game keeps its volume (Shift = everything, Ctrl = voice chat)
 - **Music ducks while friends talk** in Discord, Teams, Zoom… then fades back
+- **Study mode**: music lowers while a lecture or video plays in your browser, and the course keeps its volume
 - **Per-app volume mixer** with live level meters, **switch output device** in one click
 
 </td>
@@ -108,7 +109,10 @@ Two tiny native widgets that sit side by side, never cover your icons, and use a
 | **Middle-click** / click the ♫ % | – | Mute / unmute the music app |
 
 > [!TIP]
-> **Gaming with music and voice chat?** The widget lowers only the music when you scroll, and while someone talks in Discord (or Teams, Zoom, Slack, TeamSpeak, Mumble…) it ducks the music automatically by 60%, then fades it back. Your game volume never changes. Set the amount in **Mixer → Voice chat**, or switch the scroll back to master volume in **General**.
+> **Studying with music?** Play a lecture or course video in your browser and the music app (Spotify, Apple Music…) lowers automatically while the teacher talks. The lecture's volume is never touched. Real music apps always count as "the music", even when a video is also playing.
+
+> [!TIP]
+> **Gaming with music and voice chat?** The widget lowers only the music when you scroll, and while someone talks in Discord (or Teams, Zoom, Slack, TeamSpeak, Mumble…) it ducks the music automatically by 60%, then fades it back. Your game volume never changes. Set the amount in **Mixer → Auto-lower music**, or switch the scroll back to master volume in **General**.
 
 **Position options:** *Next to Start button* · *Left side of taskbar* · *Next to clock / tray* · *Where I drag it*
 
