@@ -177,6 +177,7 @@ namespace TaskbarWidgets
             RequestScan();
             new Updater(this).Start();
             Startup.EnsureDefault(S, Slot == 0 ? "TaskbarWidgets.Battery" : "TaskbarWidgets.Volume");
+            Watchdog.Start(Slot);
             string updated = Updater.UpdatedTo(Environment.GetCommandLineArgs());
             if (updated != null)
                 Notify("Taskbar Widgets updated to " + updated, "Click to see what's new.", () => Updater.Instance.OpenPage());
@@ -197,6 +198,7 @@ namespace TaskbarWidgets
 
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
+            Watchdog.Stop();
             if (hook != IntPtr.Zero) Native.UnhookWinEvent(hook);
             if (locHook != IntPtr.Zero) Native.UnhookWinEvent(locHook);
             SystemEvents.UserPreferenceChanged -= OnPrefsChanged;

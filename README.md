@@ -70,6 +70,7 @@ Two tiny native widgets that sit side by side, never cover your icons, and use a
 - Works with **centered or left-aligned** icons, **smaller taskbar buttons**, **labels on**, Widgets/Copilot/search box, **multiple displays**, and top or side taskbars.
 - Hides for **full-screen games and videos**, but not for maximized windows.
 - Survives an **Explorer restart** and DPI or resolution changes.
+- **Comes back by itself** if it ever crashes: the two widgets watch each other, and Windows restarts them too. Exit from the menu and it stays closed.
 
 ---
 
