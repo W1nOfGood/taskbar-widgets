@@ -34,8 +34,11 @@ if ($LASTEXITCODE -ne 0) { throw 'IconGen build failed' }
 & "$obj\IconGen.exe" $obj
 
 # 2. apps
+# stopped on purpose: clear the "running" markers first so the crash watchdog doesn't start them again
+Remove-Item "$env:APPDATA\TaskbarWidgets\running.*" -ErrorAction SilentlyContinue
 foreach ($p in 'BatteryWidget', 'VolumeMediaWidget') { Get-Process $p -ErrorAction SilentlyContinue | Stop-Process -Force }
 Start-Sleep -Milliseconds 300
+Remove-Item "$env:APPDATA\TaskbarWidgets\running.*" -ErrorAction SilentlyContinue
 if ($Only -ne 'volume') { Compile 'BatteryWidget.exe'     (@("/win32icon:$obj\battery.ico") + $shared + (Get-ChildItem "$root\src\Battery\*.cs" | ForEach-Object FullName)) }
 if ($Only -ne 'battery') { Compile 'VolumeMediaWidget.exe' (@("/win32icon:$obj\media.ico")   + $shared + (Get-ChildItem "$root\src\Volume\*.cs"  | ForEach-Object FullName)) }
 

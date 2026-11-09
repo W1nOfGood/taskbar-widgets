@@ -1,6 +1,6 @@
 using System;
 
-[assembly: System.Reflection.AssemblyVersion("1.2.0.0")]
+[assembly: System.Reflection.AssemblyVersion("1.2.1.0")]
 [assembly: System.Reflection.AssemblyTitle("Taskbar Widgets")]
 [assembly: System.Reflection.AssemblyProduct("Taskbar Widgets")]
 
@@ -9,7 +9,7 @@ namespace TaskbarWidgets
     /// <summary>Shared by both widgets and the installer.</summary>
     internal static class AppInfo
     {
-        public const string Version = "1.2.0";
+        public const string Version = "1.2.1";
         public const string Name = "Taskbar Widgets";
         public const string Repo = "W1nOfGood/taskbar-widgets";
         public const string ZipName = "TaskbarWidgets.zip";
