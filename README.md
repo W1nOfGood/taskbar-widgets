@@ -46,11 +46,12 @@ Two tiny native widgets that sit side by side, never cover your icons, and use a
 <td width="50%" valign="top">
 
 ### 🎵 Volume & Media widget
-- **Now playing** from Spotify, browsers, Media Player… with ⏮ ⏯ ⏭
+- **Now playing** from Spotify, Apple Music, browsers… with **album art** and ⏮ ⏯ ⏭
 - Album art, seekable timeline, switch between players
 - **Scroll changes only the music app**, so your game keeps its volume (Shift = everything, Ctrl = voice chat)
 - **Music ducks while friends talk** in Discord, Teams, Zoom… then fades back
 - **Study mode**: music lowers while a lecture or video plays in your browser, and the course keeps its volume
+- **Song leveling**: every song plays at about the same loudness, even when the app's own Sound Check misses
 - **Per-app volume mixer** with live level meters, **switch output device** in one click
 
 </td>
@@ -112,7 +113,10 @@ Two tiny native widgets that sit side by side, never cover your icons, and use a
 > **Studying with music?** Play a lecture or course video in your browser and the music app (Spotify, Apple Music…) lowers automatically while the teacher talks. The lecture's volume is never touched. Real music apps always count as "the music", even when a video is also playing.
 
 > [!TIP]
-> **Gaming with music and voice chat?** The widget lowers only the music when you scroll, and while someone talks in Discord (or Teams, Zoom, Slack, TeamSpeak, Mumble…) it ducks the music automatically by 60%, then fades it back. Your game volume never changes. Set the amount in **Mixer → Auto-lower music**, or switch the scroll back to master volume in **General**.
+> **Some songs too loud, others too quiet?** Set **Mixer → Music volume → Level song volume** (Gentle / Normal / Strong, on Normal by default). The widget measures how loud each song's loud parts get and adjusts only the music app. It learns your typical level over the songs you play. Typical songs play a few dB under your volume so quiet ones can be lifted; raise the master volume a little if everything feels slightly quieter.
+
+> [!TIP]
+> **Gaming with music and voice chat?** The widget lowers only the music when you scroll, and while someone talks in Discord (or Teams, Zoom, Slack, TeamSpeak, Mumble…) it ducks the music automatically by 60%, then fades it back. Your game volume never changes. Set the amount in **Mixer → Music volume**, or switch the scroll back to master volume in **General**.
 
 **Position options:** *Next to Start button* · *Left side of taskbar* · *Next to clock / tray* · *Where I drag it*
 
@@ -227,6 +231,12 @@ It never covers taskbar icons. If the spot you picked has no room left (lots of 
 <summary><b>Will it spam me with notifications?</b></summary>
 
 No. The low-battery alert fires **once per discharge** and only re-arms after the device has been charged. It's remembered even across restarts. Connect/disconnect popups are **off by default** (the widget blinks instead), and dongle mice that just fell asleep never trigger anything.
+</details>
+
+<details>
+<summary><b>Can it leave my music app too quiet?</b></summary>
+
+No. While it adjusts the music app, the widget saves your real volume to disk. Close the widget, or even force-close it, and the next start puts the volume straight back.
 </details>
 
 <details>

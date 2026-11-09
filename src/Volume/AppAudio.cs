@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -10,9 +11,12 @@ namespace TaskbarWidgets.Volume
     /// <summary>
     /// Per-app audio for the widget:
     ///  - finds the audio session of the app that is playing music (so scrolling changes only that app, not the game),
-    ///  - finds voice-chat apps (Discord, Teams, Zoom...),
-    ///  - "ducking": lowers the music while someone talks in voice chat and fades it back afterwards.
-    /// The session list is refreshed in the background every few seconds; volume changes go straight to the session.
+    ///  - finds voice-chat apps (Discord, Teams, Zoom...) and other playing media (lectures, videos),
+    ///  - one controller drives the music app's volume:  applied = your volume × song leveling × ducking.
+    ///      * leveling: measures each song's loudness (the session meter is read before the app volume) and turns loud
+    ///        songs down / quiet songs up, so every song plays at about the same level,
+    ///      * ducking: lowers the music while someone talks in voice chat or a lecture/video plays.
+    /// Your own volume is saved to disk while we adjust it, so a crash or forced close can never leave the music low.
     /// </summary>
     internal sealed class AppAudio
     {
@@ -24,24 +28,34 @@ namespace TaskbarWidgets.Volume
         List<AppSession> live = new List<AppSession>();
         bool busy;
         readonly Timer refresh = new Timer { Interval = 4000 };
-        readonly Timer duckTimer = new Timer { Interval = 100 };
+        readonly Timer tick = new Timer { Interval = 100 };
 
-        // ducking state
-        string duckKey;           // session currently lowered by us
-        float baseVol = 1f;       // the user's volume for it (what we restore to)
-        float factor = 1f;        // current multiplier (1 = not lowered)
-        float lastSet = -1f;      // what we last wrote, to notice the user changing it meanwhile
+        // ---- controller state
+        string managedKey;           // music session whose volume we are driving
+        float baseVol = 1f;          // the user's volume for it (what we restore to)
+        float lastSet = -1f;         // what we last wrote, to notice the user changing it meanwhile
+        float duckFactor = 1f;       // ducking multiplier (1 = not lowered)
+        double levelDb;              // leveling gain in dB relative to your volume: about -headroom for a typical song,
+                                     // 0 for a quiet one (lifted), lower for a loud one
         DateTime lastTalk = DateTime.MinValue, lastVideo = DateTime.MinValue;
+
+        // ---- leveling state
+        double refDb = double.NaN;   // your typical loudness, learned over many songs
+        string lastTrack; DateTime trackAt = DateTime.MinValue;
 
         static readonly string[] voiceApps = {
             "discord", "discordptb", "discordcanary", "vesktop", "ms-teams", "teams", "zoom", "slack", "skype", "telegram",
             "whatsapp", "signal", "mumble", "ts3client_win64", "ts3client_win32", "teamspeak", "webex", "ciscocollabhost", "guilded", "element", "ventrilo" };
 
+        public static readonly string[] LevelNames = { "Off", "Gentle", "Normal", "Strong" };
+
         public AppAudio(Control ui, Settings s, Func<NowPlaying> current, Func<List<NowPlaying>> allMedia)
         {
             this.ui = ui; S = s; this.current = current; this.allMedia = allMedia;
             refresh.Tick += (o, e) => Refresh();
-            duckTimer.Tick += (o, e) => DuckTick();
+            tick.Tick += (o, e) => Tick();
+            double r;
+            if (double.TryParse(S.Get("levelRef2", ""), NumberStyles.Float, CultureInfo.InvariantCulture, out r)) refDb = r;
         }
 
         public void Start() { refresh.Start(); Refresh(); }
@@ -57,17 +71,20 @@ namespace TaskbarWidgets.Volume
                 var old = live;
                 live = t.Result;
                 Audio.Release(old);
+                RecoverAfterCrash();
                 var np = current();
                 var mu = Music;
                 Log.Info("volume", "sessions: " + string.Join(" | ", live.Select(x => x.Name + " [" + Path.GetFileName(x.ExePath ?? "") + "]")) +
                          " || media app=" + (np == null ? "-" : np.AppId) + " -> music=" + (mu == null ? "none" : mu.Name) +
                          " || voice=" + string.Join(",", Voice.Select(x => x.Name)) + " || video=" + string.Join(",", Videos.Select(x => x.Name)));
-                bool needDuck = mu != null && (S.Bool("duck", true) && Voice.Count > 0 || S.Bool("duckVideo", true) && Videos.Count > 0) || duckKey != null;
-                if (needDuck && !duckTimer.Enabled) duckTimer.Start();
-                if (!needDuck && duckTimer.Enabled) duckTimer.Stop();
+                bool need = mu != null && (LevelMode > 0 || S.Bool("duck", true) && Voice.Count > 0 || S.Bool("duckVideo", true) && Videos.Count > 0) || managedKey != null;
+                if (need && !tick.Enabled) tick.Start();
+                if (!need && tick.Enabled) tick.Stop();
                 if (Changed != null) Changed();
             }, TaskScheduler.FromCurrentSynchronizationContext());
         }
+
+        public int LevelMode { get { return Math.Max(0, Math.Min(3, S.Int("level", 2))); } }
 
         // ---------------------------------------------------------------- matching
 
@@ -136,71 +153,209 @@ namespace TaskbarWidgets.Volume
 
         // ---------------------------------------------------------------- user volume changes
 
-        /// <summary>The music app's volume as the user set it (ignores our temporary ducking).</summary>
+        /// <summary>The music app's volume as the user set it (ignores our temporary adjustments).</summary>
         public float MusicVolume(AppSession m)
         {
             if (m == null) return 0;
-            return duckKey == m.Key ? baseVol : m.LiveVolume();
+            return managedKey == m.Key ? baseVol : m.LiveVolume();
         }
 
         public void SetMusicVolume(AppSession m, float v)
         {
             v = Math.Max(0, Math.Min(1, v));
-            if (duckKey == m.Key)
-            {
-                baseVol = v;
-                lastSet = baseVol * factor;
-                m.SetVolume(lastSet);
-            }
+            if (managedKey == m.Key) { baseVol = v; SaveBase(); Apply(m, true); }
             else m.SetVolume(v);
             if (v > 0 && m.LiveMuted()) m.SetMute(false);
         }
 
-        // ---------------------------------------------------------------- ducking
+        /// <summary>Leveling headroom: typical songs play this much under your volume so quiet ones can be lifted.</summary>
+        double Headroom { get { return LevelMode == 1 ? 3 : LevelMode == 3 ? 6 : LevelMode == 2 ? 4 : 0; } }
+        double MaxCut { get { return LevelMode == 1 ? 6 : LevelMode == 3 ? 15 : 10; } }
 
-        void DuckTick()
+        float Multiplier
+        {
+            get
+            {
+                return (float)(Math.Pow(10, levelDb / 20) * duckFactor);
+            }
+        }
+
+        void Apply(AppSession m, bool force)
+        {
+            float v = Math.Max(0, Math.Min(1, baseVol * Multiplier));
+            if (force || lastSet < 0 || Math.Abs(v - lastSet) > 0.002f) { m.SetVolume(v); lastSet = v; }
+        }
+
+        // ---------------------------------------------------------------- the controller (every 100 ms while needed)
+
+        void Tick()
         {
             var music = Music;
             var np = current();
+            if (music == null || IsVoice(music)) { Release(); tick.Stop(); return; }
+            if (managedKey != null && managedKey != music.Key) Release(); // switched to another music app: give the old one back
+
+            bool playing = np != null && np.Playing;
             var voice = S.Bool("duck", true) ? Voice : new List<AppSession>();
             var videos = S.Bool("duckVideo", true) ? Videos : new List<AppSession>();
-            bool enabled = music != null && !IsVoice(music) && (S.Bool("duck", true) || S.Bool("duckVideo", true));
-            // hard stop only when the music app changed or the feature is off; a source disappearing just fades back up
-            if (!enabled || (duckKey != null && duckKey != music.Key)) { Restore(); if (!enabled) duckTimer.Stop(); return; }
-            if (voice.Count == 0 && videos.Count == 0 && duckKey == null) { duckTimer.Stop(); return; } // nothing to do; Refresh restarts us
 
-            bool musicPlaying = np != null && np.Playing;
+            // --- ducking target
             float peak = 0;
             foreach (var v in voice) peak = Math.Max(peak, v.LivePeak());
-            if (peak > 0.02f && musicPlaying) lastTalk = DateTime.Now;
-            // lectures/videos: hold longer so short pauses between sentences don't pump the music up and down
+            if (peak > 0.02f && playing) lastTalk = DateTime.Now;
             float vpeak = 0;
             foreach (var v in videos) vpeak = Math.Max(vpeak, v.LivePeak());
-            if (vpeak > 0.015f && musicPlaying) lastVideo = DateTime.Now;
-            bool talking = (DateTime.Now - lastTalk).TotalMilliseconds < 1300 || (DateTime.Now - lastVideo).TotalMilliseconds < 4000;
+            if (vpeak > 0.015f && playing) lastVideo = DateTime.Now;
+            bool duck = (DateTime.Now - lastTalk).TotalMilliseconds < 1300 || (DateTime.Now - lastVideo).TotalMilliseconds < 4000;
             float amount = Math.Max(0.1f, Math.Min(0.95f, S.Int("duckAmount", 60) / 100f));
-            float target = talking ? 1f - amount : 1f;
-            if (duckKey == null && target >= 1f) return; // idle
+            float duckTarget = duck ? 1f - amount : 1f;
 
-            if (duckKey == null) { duckKey = music.Key; baseVol = music.LiveVolume(); factor = 1f; lastSet = -1f; Log.Info("volume", "duck start: " + music.Name + " base=" + baseVol); }
+            // nothing to do at all: stay out of the way
+            if (managedKey == null && LevelMode == 0 && duckTarget >= 1f) return;
+
+            if (managedKey == null) StartManaging(music);
+
+            // the user moved the app's own slider (Windows mixer, the app itself...) since our last write: adopt it
             float cur = music.LiveVolume();
-            // the user moved the app's slider (e.g. in the Windows mixer) while lowered: adopt it
-            if (lastSet >= 0 && Math.Abs(cur - lastSet) > 0.02f) baseVol = Math.Min(1f, cur / Math.Max(0.05f, factor));
+            if (lastSet >= 0 && Math.Abs(cur - lastSet) > 0.02f)
+            {
+                baseVol = Math.Min(1f, cur / Math.Max(0.02f, Multiplier));
+                SaveBase();
+            }
 
-            factor += (target - factor) * (target < factor ? 0.35f : 0.1f);  // quick down, slow up
-            if (Math.Abs(factor - target) < 0.01f) factor = target;
-            lastSet = baseVol * factor;
-            music.SetVolume(lastSet);
-            if (factor >= 1f) { duckKey = null; lastSet = -1f; Log.Info("volume", "duck end: restored " + baseVol); }
+            duckFactor += (duckTarget - duckFactor) * (duckTarget < duckFactor ? 0.35f : 0.1f); // quick down, slow up
+            if (Math.Abs(duckFactor - duckTarget) < 0.01f) duckFactor = duckTarget;
+
+            if (LevelMode > 0) UpdateLevel(music, np, playing);
+            else levelDb = MoveTowards(levelDb, 0, 0.3); // fade leveling out after it is switched off
+
+            Apply(music, false);
+
+            // fully back to the user's volume and nothing else to do: hand the volume back
+            if (LevelMode == 0 && duckFactor >= 1f && Math.Abs(levelDb) < 0.05) Release();
         }
 
-        /// <summary>Puts a lowered app back to the user's volume (music app changed, feature turned off, app exit).</summary>
-        public void Restore()
+        void UpdateLevel(AppSession music, NowPlaying np, bool playing)
         {
-            if (duckKey == null) return;
-            var s = live.FirstOrDefault(x => x.Key == duckKey);
+            if (!playing) return; // paused: hold the current gain
+            string track = np.Line;
+            if (track != lastTrack)
+            {
+                // learn your typical level from the song that just ended (if we heard enough of it)
+                if (!double.IsNaN(songDb) && songAudioSec > 20)
+                {
+                    refDb = double.IsNaN(refDb) ? songDb : refDb + (songDb - refDb) * 0.25;
+                    S.Set("levelRef2", refDb.ToString("F2", CultureInfo.InvariantCulture));
+                }
+                lastTrack = track; trackAt = DateTime.Now;
+                Array.Clear(hist, 0, hist.Length); histN = 0; songDb = double.NaN; songAudioSec = 0; shortDb = double.NaN;
+            }
+
+            float p = music.LivePeak();                 // measured before the app volume: the song itself
+            if (p > 0.004f)                             // ignore silence between songs
+            {
+                double db = 20 * Math.Log10(p);
+                shortDb = double.IsNaN(shortDb) ? db : shortDb + (db - shortDb) * (1 - Math.Exp(-0.1 / 1.5)); // ~1.5 s loudness
+                songAudioSec += 0.1;
+                int bin = Math.Max(0, Math.Min(hist.Length - 1, (int)Math.Round(-shortDb)));
+                hist[bin]++; histN++;
+                if (songAudioSec >= 3)
+                {
+                    // how loud the loud parts of this song get (90th percentile), so quiet intros/verses don't count
+                    int need = histN / 10, acc = 0;
+                    double p90 = double.NaN;
+                    for (int b = 0; b < hist.Length; b++) { acc += hist[b]; if (acc > need) { p90 = -b; break; } }
+                    // only grows within a song: the gain never pumps back up in a quiet bridge
+                    if (!double.IsNaN(p90)) songDb = double.IsNaN(songDb) ? p90 : Math.Max(songDb, p90);
+                }
+            }
+
+            double reference = double.IsNaN(refDb) ? songDb : refDb; // the very first song becomes the reference
+            if (double.IsNaN(songDb) || double.IsNaN(reference))
+            {
+                // first seconds of a song: only react to a sudden blast well above your typical level
+                if (!double.IsNaN(shortDb) && !double.IsNaN(refDb) && shortDb > refDb + 6)
+                    levelDb = MoveTowards(levelDb, Math.Max(-MaxCut - Headroom, refDb - shortDb - Headroom), 0.3);
+                return;
+            }
+            // typical song -> -headroom, quiet song -> up to 0 (your volume), loud song -> down to -(cut + headroom)
+            double want = Math.Max(-MaxCut, Math.Min(Headroom, reference - songDb)) - Headroom;
+            levelDb = MoveTowards(levelDb, want, want < levelDb ? 0.15 : 0.1); // 1.5 dB/s down, 1 dB/s up
+            if ((DateTime.Now - levelLogAt).TotalSeconds > 5)
+            {
+                levelLogAt = DateTime.Now;
+                Log.Info("volume", string.Format(CultureInfo.InvariantCulture, "level: song {0:F1} dB (now {1:F1}), typical {2:F1} dB, gain {3:F1} dB, duck {4:F2}, applied {5:F2} (your volume {6:F2})",
+                    songDb, shortDb, reference, levelDb, duckFactor, lastSet, baseVol));
+            }
+        }
+        DateTime levelLogAt = DateTime.MinValue;
+        readonly int[] hist = new int[80];              // 1 dB bins of short-term loudness for the current song
+        int histN; double shortDb = double.NaN, songDb = double.NaN, songAudioSec;
+
+        static double MoveTowards(double v, double target, double maxStep)
+        {
+            if (Math.Abs(target - v) <= maxStep) return target;
+            return v + Math.Sign(target - v) * maxStep;
+        }
+
+        void StartManaging(AppSession music)
+        {
+            managedKey = music.Key;
+            float saved;
+            // a previous run was force-closed while adjusting: its saved value is the real one
+            baseVol = TryLoadBase(music.Key, out saved) ? saved : music.LiveVolume();
+            duckFactor = 1f;
+            levelDb = 0;
+            lastSet = -1f;
+            SaveBase();
+            Log.Info("volume", "managing " + music.Name + " base=" + baseVol);
+        }
+
+        /// <summary>Puts the music app back to the user's volume and stops adjusting it.</summary>
+        public void Release()
+        {
+            if (managedKey == null) return;
+            var s = live.FirstOrDefault(x => x.Key == managedKey);
             if (s != null) s.SetVolume(baseVol);
-            duckKey = null; factor = 1f; lastSet = -1f;
+            S.Set("managed." + Hash(managedKey), "");
+            Log.Info("volume", "released, restored " + baseVol);
+            managedKey = null; duckFactor = 1f; lastSet = -1f;
+        }
+
+        /// <summary>Kept for callers: same as <see cref="Release"/>.</summary>
+        public void Restore() { Release(); }
+
+        // ---------------------------------------------------------------- crash safety
+
+        void SaveBase()
+        {
+            if (managedKey != null) S.Set("managed." + Hash(managedKey), baseVol.ToString("F4", CultureInfo.InvariantCulture));
+        }
+
+        bool TryLoadBase(string key, out float v)
+        {
+            return float.TryParse(S.Get("managed." + Hash(key), ""), NumberStyles.Float, CultureInfo.InvariantCulture, out v) && v >= 0 && v <= 1;
+        }
+
+        /// <summary>After a crash/forced close a session may still be lowered: put any such session back right away.</summary>
+        void RecoverAfterCrash()
+        {
+            foreach (var s in live)
+            {
+                if (s.Key == managedKey) continue;
+                float v;
+                if (!TryLoadBase(s.Key, out v)) continue;
+                s.SetVolume(v);
+                S.Set("managed." + Hash(s.Key), "");
+                Log.Info("volume", "recovered " + s.Name + " to " + v);
+            }
+        }
+
+        static string Hash(string s)
+        {
+            uint h = 2166136261;
+            foreach (char c in s) { h ^= c; h *= 16777619; }
+            return h.ToString("x8");
         }
     }
 }

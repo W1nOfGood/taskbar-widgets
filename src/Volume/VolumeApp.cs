@@ -47,7 +47,7 @@ namespace TaskbarWidgets.Volume
             Media.Changed += () =>
             {
                 var np = Media.Current;
-                string line = np == null ? null : np.Line + np.Playing;
+                string line = np == null ? null : np.Line + np.Playing + (np.Art != null ? "+art" : "");
                 if (line != lastLine) { lastLine = line; Render(); }
                 string app = np == null ? null : np.AppId;
                 if (app != lastApp) { lastApp = app; Apps.Refresh(); } // a different player: find its audio session
@@ -185,7 +185,11 @@ namespace TaskbarWidgets.Volume
             {
                 if (np != null)
                 {
-                    if (S.Bool("showIcon", true) && level < 2) { L.Icon = new RectangleF(x, h * 0.25f, h * 0.5f, h * 0.5f); x += L.Icon.Width + gap * 1.5f; }
+                    if (PicMode != 2 && level < 2)
+                    {
+                        float sz = UseArt(np) ? h * 0.68f : h * 0.5f;
+                        L.Icon = new RectangleF(x, (h - sz) / 2, sz, sz); x += sz + gap * 1.5f;
+                    }
                     if (S.Bool("showButtons", true) && level < 4)
                     {
                         if (level < 3) { L.Prev = new RectangleF(x, (h - btn) / 2, btn, btn); x += btn; }
@@ -224,6 +228,10 @@ namespace TaskbarWidgets.Volume
 
         protected override int MeasureWidth(Graphics g, int h) { return Measure(g, h).Width; }
 
+        /// <summary>0 = album art (falls back to the app icon), 1 = app icon, 2 = none.</summary>
+        int PicMode { get { return S.Bool("showIcon", true) ? S.Int("leftPic", 0) : 2; } }
+        bool UseArt(NowPlaying np) { return PicMode == 0 && np != null && np.Art != null; }
+
         protected override void PaintWidget(Graphics g, Rectangle r)
         {
             int style = S.Int("style", 0);
@@ -247,11 +255,19 @@ namespace TaskbarWidgets.Volume
             Color icon = style == 3 ? T.Accent : fg;
             if (L.Icon.Width > 0)
             {
-                if (np != null && np.AppIcon != null)
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                if (UseArt(np))
                 {
-                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                    g.DrawImage(np.AppIcon, L.Icon);
+                    using (var path = Gfx.Round(L.Icon, L.Icon.Width * 0.22f))
+                    {
+                        var st = g.Save();
+                        g.SetClip(path);
+                        g.DrawImage(np.Art, L.Icon);
+                        g.Restore(st);
+                        using (var pen = new Pen(Gfx.Alpha(fg, 40), 1f)) g.DrawPath(pen, path);
+                    }
                 }
+                else if (np != null && np.AppIcon != null) g.DrawImage(np.AppIcon, L.Icon);
                 else Gfx.Icon(g, Glyph.Note, L.Icon, Gfx.Mix(T.Accent, fg, 0.2f), 1);
             }
             if (L.Play.Width > 0 && np != null)
@@ -596,11 +612,13 @@ namespace TaskbarWidgets.Volume
                 v => vw.SetVolume((int)Math.Round(v * 100)), vw.ToggleMute);
             ui.EndCard();
 
-            ui.Section("Auto-lower music");
+            ui.Section("Music volume");
             ui.BeginCard();
-            ui.Toggle("While people talk in voice chat", "Discord, Teams, Zoom, Slack, TeamSpeak, Mumble... The music fades down, then back up. Games are not touched.",
+            ui.Dropdown("Level song volume", "Keeps every song at about the same loudness, even when the app's own Sound Check misses. Typical songs play a few dB under your volume so quiet ones can be lifted.",
+                AppAudio.LevelNames, vw.Apps.LevelMode, v => { S.Set("level", v); vw.Apps.Refresh(); });
+            ui.Toggle("Lower music while people talk in voice chat", "Discord, Teams, Zoom, Slack, TeamSpeak, Mumble... The music fades down, then back up. Games are not touched.",
                 S.Bool("duck", true), v => { S.Set("duck", v); vw.Apps.Restore(); vw.Apps.Refresh(); });
-            ui.Toggle("While a lecture or video plays", "A course, YouTube or a video player in your browser keeps its volume; only the music app is lowered.",
+            ui.Toggle("Lower music while a lecture or video plays", "A course, YouTube or a video player in your browser keeps its volume; only the music app is lowered.",
                 S.Bool("duckVideo", true), v => { S.Set("duckVideo", v); vw.Apps.Restore(); vw.Apps.Refresh(); });
             if (S.Bool("duck", true) || S.Bool("duckVideo", true))
                 ui.Slider("Lower music by", null, S.Int("duckAmount", 60), 20, 90, "%", v => S.Set("duckAmount", v));
@@ -681,6 +699,8 @@ namespace TaskbarWidgets.Volume
             ui.EndCard();
         }
 
+        static int PicModeOf(Settings S) { return S.Bool("showIcon", true) ? S.Int("leftPic", 0) : 2; }
+
         void DesignTab(Ui ui)
         {
             var S = W.S;
@@ -689,7 +709,8 @@ namespace TaskbarWidgets.Volume
             ui.BeginCard();
             ui.Dropdown("Track text", null, new[] { "Artist – Title", "Title only", "Hidden" }, S.Int("titleMode", 0), v => S.Set("titleMode", v));
             ui.Slider("Maximum text width", "Longer titles end with …", S.Int("titleWidth", 200), 80, 420, "px", v => S.Set("titleWidth", v));
-            ui.Toggle("App icon", "Spotify, browser, player... icon on the left.", S.Bool("showIcon", true), v => S.Set("showIcon", v));
+            ui.Dropdown("Picture on the left", "Album art of the song that is playing, or the player's icon.",
+                new[] { "Album art (or app icon)", "App icon", "None" }, PicModeOf(S), v => { S.Set("showIcon", v != 2); S.Set("leftPic", v == 2 ? 0 : v); });
             ui.Toggle("Media buttons", "Previous, play/pause and next.", S.Bool("showButtons", true), v => S.Set("showButtons", v));
             ui.Toggle("Progress line", "Thin line under the title showing the track position.", S.Bool("progress", true), v => S.Set("progress", v));
             ui.Toggle("Volume level", "Speaker icon and percentage. Scroll to change, click to mute.", S.Bool("showVolume", true), v => S.Set("showVolume", v));
