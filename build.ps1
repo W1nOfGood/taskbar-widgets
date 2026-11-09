@@ -39,6 +39,23 @@ Start-Sleep -Milliseconds 300
 if ($Only -ne 'volume') { Compile 'BatteryWidget.exe'     (@("/win32icon:$obj\battery.ico") + $shared + (Get-ChildItem "$root\src\Battery\*.cs" | ForEach-Object FullName)) }
 if ($Only -ne 'battery') { Compile 'VolumeMediaWidget.exe' (@("/win32icon:$obj\media.ico")   + $shared + (Get-ChildItem "$root\src\Volume\*.cs"  | ForEach-Object FullName)) }
 
+# 3. installer: one exe that carries both apps (only on a full build)
+if ($Only -eq '') {
+  Write-Host "Building TaskbarWidgetsSetup.exe" -ForegroundColor Cyan
+  $setupSrc = "$root\src\Setup\Setup.cs", "$root\src\Shared\Gfx.cs", "$root\src\Shared\Native.cs", "$root\src\Shared\Version.cs"
+  & $csc /nologo /optimize+ /platform:x64 /target:winexe /debug- "/win32manifest:$root\src\Shared\app.manifest" "/win32icon:$obj\battery.ico" `
+    /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll `
+    "/resource:$bin\BatteryWidget.exe,TaskbarWidgets.BatteryWidget.exe" "/resource:$bin\VolumeMediaWidget.exe,TaskbarWidgets.VolumeMediaWidget.exe" `
+    "/resource:$root\LICENSE,TaskbarWidgets.LICENSE" "/out:$bin\TaskbarWidgetsSetup.exe" @setupSrc
+  if ($LASTEXITCODE -ne 0) { throw 'Build failed: TaskbarWidgetsSetup.exe' }
+
+  # 4. release files: the installer + the portable zip (the auto-updater downloads the zip)
+  $dist = Join-Path $root 'dist'
+  New-Item -ItemType Directory -Force $dist | Out-Null
+  Copy-Item "$bin\TaskbarWidgetsSetup.exe" $dist -Force
+  Compress-Archive -Path "$bin\BatteryWidget.exe", "$bin\VolumeMediaWidget.exe", "$root\LICENSE" -DestinationPath "$dist\TaskbarWidgets.zip" -Force
+}
+
 Write-Host "Done -> $bin" -ForegroundColor Green
 if ($Run) {
   if ($Only -ne 'volume') { Start-Process "$bin\BatteryWidget.exe" }

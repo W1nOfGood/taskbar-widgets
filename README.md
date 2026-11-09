@@ -88,13 +88,35 @@ Two tiny native widgets that sit side by side, never cover your icons, and use a
 
 ## 🚀 Install
 
-1. Download **`TaskbarWidgets.zip`** from the [latest release](https://github.com/W1nOfGood/taskbar-widgets/releases/latest).
-2. Extract it anywhere (for example `C:\Tools\TaskbarWidgets`). Keep both `.exe` files in the same folder.
-3. Run **`BatteryWidget.exe`** and/or **`VolumeMediaWidget.exe`**.
-4. That's it: they **start with Windows automatically** from now on (turn it off in **General → Behavior → Start with Windows**).
+<table>
+<tr>
+<td width="55%" valign="top">
+
+1. Download **[`TaskbarWidgetsSetup.exe`](https://github.com/W1nOfGood/taskbar-widgets/releases/latest/download/TaskbarWidgetsSetup.exe)** (about 400 KB).
+2. Run it, pick what you want, and click **Install**. No admin rights needed.
+3. Done. Both widgets appear on your taskbar, start with Windows and update themselves.
+
+**Uninstall:** *Settings → Apps → Installed apps → Taskbar Widgets → Uninstall*, or *Start menu → Uninstall Taskbar Widgets*. It closes the widgets, puts back any music volume they had lowered, and removes everything. Deleting your settings is optional.
+
+**Update or change options:** run the setup again.
+
+</td>
+<td width="45%" valign="top">
+<img src="docs/images/setup.png" alt="Taskbar Widgets setup window" width="100%">
+</td>
+</tr>
+</table>
 
 > [!NOTE]
 > The apps aren't code-signed, so Windows SmartScreen may warn on first launch. Click **More info → Run anyway**, or build them yourself from source (one command, below).
+
+<details>
+<summary><b>Portable version, silent install</b></summary>
+
+- **Portable:** download [`TaskbarWidgets.zip`](https://github.com/W1nOfGood/taskbar-widgets/releases/latest/download/TaskbarWidgets.zip), extract it anywhere and run the `.exe` files (keep them in the same folder).
+- **Silent install** (for scripts): `TaskbarWidgetsSetup.exe --quiet`
+- **Silent uninstall:** `"%LOCALAPPDATA%\Programs\Taskbar Widgets\Uninstall.exe" --uninstall --quiet` (add `--delete-settings` to remove settings too)
+</details>
 
 ### Requirements
 - Windows 11 (Windows 10 should work but isn't tested yet)
@@ -181,8 +203,9 @@ No SDK needed: the build uses the C# compiler that ships with Windows.
 ```powershell
 git clone https://github.com/W1nOfGood/taskbar-widgets.git
 cd taskbar-widgets
-.\build.ps1 -Run            # builds bin\BatteryWidget.exe + bin\VolumeMediaWidget.exe and starts them
+.\build.ps1 -Run            # builds both widgets + the installer, and starts the widgets
 .\build.ps1 -Only battery   # just one app
+# release files end up in dist\: TaskbarWidgetsSetup.exe and TaskbarWidgets.zip
 ```
 
 <details>
@@ -192,7 +215,8 @@ cd taskbar-widgets
 src/
 ├─ Shared/      taskbar host window, free-space layout, panel UI kit, theme, icons, raw-COM UI Automation
 ├─ Battery/     Bluetooth / Razer HID / system battery + battery widget & panel
-└─ Volume/      Core Audio (master, per-app, output switching) + media sessions + widget & panel
+├─ Volume/      Core Audio (master, per-app, output switching) + media sessions + widget & panel
+└─ Setup/       installer / uninstaller (both apps are embedded in it as resources)
 docs/images/    README screenshots
 build.ps1       build script (also renders the .ico files from the same vector icons)
 ```

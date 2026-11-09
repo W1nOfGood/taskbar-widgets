@@ -232,6 +232,9 @@ namespace TaskbarWidgets
             if (Demo.On || Environment.GetEnvironmentVariable("TW_FAKE_VERSION") != null) return;
             try
             {
+                using (var own = Registry.CurrentUser.OpenSubKey(AppInfo.OwnKey))
+                    if (own != null && own.GetValue("StartupChosen") != null && !s.Bool("startupInit", false))
+                        s.Set("startupInit", true); // the installer already asked
                 if (!s.Bool("startupInit", false))
                 {
                     s.Set("startupInit", true);

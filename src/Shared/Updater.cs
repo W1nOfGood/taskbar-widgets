@@ -10,25 +10,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-[assembly: System.Reflection.AssemblyVersion("1.1.1.0")]
-[assembly: System.Reflection.AssemblyTitle("Taskbar Widgets")]
-
 namespace TaskbarWidgets
 {
-    internal static class AppInfo
-    {
-        public const string Version = "1.1.1";
-        public const string Repo = "W1nOfGood/taskbar-widgets";
-        public const string ZipName = "TaskbarWidgets.zip";
-        public static readonly string[] Exes = { "BatteryWidget.exe", "VolumeMediaWidget.exe" };
-
-        /// <summary>TW_FAKE_VERSION lets you test the updater against the real latest release.</summary>
-        public static string Current
-        {
-            get { string f = Environment.GetEnvironmentVariable("TW_FAKE_VERSION"); return string.IsNullOrEmpty(f) ? Version : f; }
-        }
-    }
-
     /// <summary>
     /// Checks GitHub for a newer release (once a day, nothing is sent but the request itself) and can install it:
     /// download → verify SHA-256 (GitHub's published digest) → swap the .exe files (running ones are renamed, with
@@ -248,6 +231,14 @@ namespace TaskbarWidgets
                 Raise();
                 return;
             }
+
+            try
+            {
+                using (var k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(AppInfo.UninstallKey, true))
+                    if (k != null && string.Equals(((k.GetValue("InstallLocation") as string) ?? "").TrimEnd('\\'), appDir.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase))
+                        k.SetValue("DisplayVersion", ver);
+            }
+            catch { }
 
             // restart the other widget (if it runs) and then ourselves; new instances wait for the old ones to exit
             int self = Process.GetCurrentProcess().Id;
