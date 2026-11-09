@@ -66,7 +66,8 @@ param([switch]$Uninstall, [switch]$DeleteSettings, [switch]$Window)
     catch { Write-Warning "Couldn't read the release info from GitHub ($($_.Exception.Message)). Downloading the latest setup without a checksum." }
 
     $old = Installed
-    if ($old -and $old.DisplayVersion) { Write-Host "Taskbar Widgets $($old.DisplayVersion) is installed. Updating to $version..." }
+    if ($old -and $old.DisplayVersion -and $version.TrimStart('v') -eq $old.DisplayVersion) { Write-Host "Taskbar Widgets $($old.DisplayVersion) is already installed. Reinstalling it..." }
+    elseif ($old -and $old.DisplayVersion) { Write-Host "Taskbar Widgets $($old.DisplayVersion) is installed. Updating to $version..." }
     else { Write-Host "Installing Taskbar Widgets $version..." }
 
     # a fresh, empty folder of our own, deleted afterwards
