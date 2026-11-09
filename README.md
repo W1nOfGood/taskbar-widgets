@@ -8,10 +8,11 @@
 Two tiny native widgets that sit side by side, never cover your icons, and use about 15 MB of RAM each.
 
 [![Windows 11](https://img.shields.io/badge/Windows-11-0078D4?style=for-the-badge&logo=windows11&logoColor=white)](#requirements)
-[![C#](https://img.shields.io/badge/C%23-.NET_Framework_4.8-512BD4?style=for-the-badge&logo=dotnet&logoColor=white)](#build-from-source)
-[![RAM](https://img.shields.io/badge/RAM-~15_MB-22C58C?style=for-the-badge)](#performance)
-[![No install](https://img.shields.io/badge/runtime-nothing_to_install-A86C3E?style=for-the-badge)](#install)
+[![C#](https://img.shields.io/badge/C%23-.NET_Framework_4.8-512BD4?style=for-the-badge&logo=dotnet&logoColor=white)](#-build-from-source)
+[![RAM](https://img.shields.io/badge/RAM-~15_MB-22C58C?style=for-the-badge)](#-performance)
+[![No install](https://img.shields.io/badge/runtime-nothing_to_install-A86C3E?style=for-the-badge)](#-install)
 [![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey?style=for-the-badge)](LICENSE)
+[![Install with AI](https://img.shields.io/badge/install-ask_your_AI-8B5CF6?style=for-the-badge)](#-ask-an-ai-to-install-it)
 
 [![Release](https://img.shields.io/github/v/release/W1nOfGood/taskbar-widgets?style=flat-square&label=latest&color=A86C3E)](https://github.com/W1nOfGood/taskbar-widgets/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/W1nOfGood/taskbar-widgets/total?style=flat-square&color=22C58C)](https://github.com/W1nOfGood/taskbar-widgets/releases)
@@ -108,14 +109,36 @@ Two tiny native widgets that sit side by side, never cover your icons, and use a
 </table>
 
 > [!NOTE]
-> The apps aren't code-signed, so Windows SmartScreen may warn on first launch. Click **More info → Run anyway**, or build them yourself from source (one command, below).
+> The apps aren't code-signed, so Windows SmartScreen may warn on first launch. Click **More info → Run anyway**, or use the one-line install below, which doesn't trigger it.
+
+### ⚡ Or in one line
+
+Paste this into **PowerShell** (Start menu → type `PowerShell` → Enter):
+
+```powershell
+irm https://raw.githubusercontent.com/W1nOfGood/taskbar-widgets/main/install.ps1 | iex
+```
+
+It downloads the latest release, checks that the file matches its published SHA-256, and installs it silently. It needs no admin rights. Run it again any time to update. The script is short and easy to read: [`install.ps1`](install.ps1).
+
+### 🤖 Ask an AI to install it
+
+Not sure how? Let your assistant do it. Copy this into **Claude, ChatGPT, Gemini, Copilot** or any other AI:
+
+```text
+Please install Taskbar Widgets on my Windows PC.
+Instructions for AI assistants: https://raw.githubusercontent.com/W1nOfGood/taskbar-widgets/main/AGENTS.md
+```
+
+An agent that can run commands on your PC installs it for you and checks that it's running. Examples are Claude Code, Codex, Gemini CLI and Copilot. A chat assistant walks you through it step by step instead. The instructions are in [`AGENTS.md`](AGENTS.md), with a summary in [`llms.txt`](llms.txt). They also cover updating, uninstalling and fixing common problems.
 
 <details>
-<summary><b>Portable version, silent install</b></summary>
+<summary><b>Portable version, silent install, uninstall from the command line</b></summary>
 
 - **Portable:** download [`TaskbarWidgets.zip`](https://github.com/W1nOfGood/taskbar-widgets/releases/latest/download/TaskbarWidgets.zip), extract it anywhere and run the `.exe` files (keep them in the same folder).
 - **Silent install** (for scripts): `TaskbarWidgetsSetup.exe --quiet`
 - **Silent uninstall:** `"%LOCALAPPDATA%\Programs\Taskbar Widgets\Uninstall.exe" --uninstall --quiet` (add `--delete-settings` to remove settings too)
+- **One-line script options:** `& ([scriptblock]::Create((irm https://raw.githubusercontent.com/W1nOfGood/taskbar-widgets/main/install.ps1))) -Uninstall` (also `-DeleteSettings`, or `-Window` to open the setup window instead)
 </details>
 
 ### Requirements
@@ -196,7 +219,7 @@ How it stays this light:
 
 ---
 
-## 🛠️ Build from source
+## 🔧 Build from source
 
 No SDK needed: the build uses the C# compiler that ships with Windows.
 
@@ -219,6 +242,8 @@ src/
 └─ Setup/       installer / uninstaller (both apps are embedded in it as resources)
 docs/images/    README screenshots
 build.ps1       build script (also renders the .ico files from the same vector icons)
+install.ps1     one-line installer (downloads the latest release, checks SHA-256, installs silently)
+AGENTS.md       instructions for AI assistants: install for a user, or work on the code (llms.txt sums it up)
 ```
 </details>
 

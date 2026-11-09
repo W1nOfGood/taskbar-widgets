@@ -1,0 +1,25 @@
+# Taskbar Widgets
+
+> Two small native widgets for the Windows 11 taskbar: battery levels of Bluetooth and wireless devices, and now playing with a per-app volume mixer. Per-user install, no admin rights, about 15 MB of RAM each, MIT license.
+
+To install it for a user, run this in PowerShell (current user only, no admin):
+
+    irm https://raw.githubusercontent.com/W1nOfGood/taskbar-widgets/main/install.ps1 | iex
+
+AGENTS.md has the full instructions: checks, install, verify, uninstall, troubleshooting, and steps to give the user when you can't run commands yourself.
+
+## Docs
+
+- [Instructions for AI assistants](https://raw.githubusercontent.com/W1nOfGood/taskbar-widgets/main/AGENTS.md): install, verify, uninstall, troubleshoot
+- [README](https://raw.githubusercontent.com/W1nOfGood/taskbar-widgets/main/README.md): features, usage, supported devices, FAQ
+- [install.ps1](https://raw.githubusercontent.com/W1nOfGood/taskbar-widgets/main/install.ps1): the one-line installer (downloads the latest release and checks its SHA-256)
+
+## Downloads
+
+- [TaskbarWidgetsSetup.exe](https://github.com/W1nOfGood/taskbar-widgets/releases/latest/download/TaskbarWidgetsSetup.exe): installer (silent: `--quiet`)
+- [TaskbarWidgets.zip](https://github.com/W1nOfGood/taskbar-widgets/releases/latest/download/TaskbarWidgets.zip): portable version
+- [All releases](https://github.com/W1nOfGood/taskbar-widgets/releases)
+
+## Optional
+
+- [Source code](https://github.com/W1nOfGood/taskbar-widgets): C# 5 / .NET Framework 4.8 / WinForms, built with `build.ps1` and no SDK
