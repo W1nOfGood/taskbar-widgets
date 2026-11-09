@@ -377,6 +377,24 @@ namespace TaskbarWidgets
             ui.EndCard();
         }
 
+        bool updHooked;
+
+        protected void UpdatesSection(Ui ui)
+        {
+            var u = Updater.Instance;
+            if (u == null) return;
+            if (!updHooked) { updHooked = true; u.Changed += () => { if (Visible) Invalidate(); }; }
+            ui.Section("Updates");
+            ui.BeginCard();
+            string status = string.IsNullOrEmpty(u.Status) ? "Version " + AppInfo.Current + "." : u.Status;
+            ui.Label(status, F.Body, u.Available ? T.Good : T.Sub);
+            if (u.Available && !u.Busy) ui.Button("Install " + u.Latest + " now", true, () => u.Install());
+            else ui.Button(u.Busy ? "Working…" : "Check for updates", false, () => u.CheckNow(true));
+            ui.Toggle("Check for updates", "Once a day, asks GitHub for the latest release. Nothing else is sent.", u.CheckEnabled, v => u.CheckEnabled = v);
+            ui.Toggle("Install updates automatically", "Downloads, verifies and installs new versions, then restarts the widgets.", u.AutoInstall, v => u.AutoInstall = v);
+            ui.EndCard();
+        }
+
         protected void AppearanceSection(Ui ui)
         {
             var S = W.S;

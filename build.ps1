@@ -14,7 +14,7 @@ New-Item -ItemType Directory -Force $bin, $obj | Out-Null
 function Facade($name, $token = 'b03f5f7f11d50a3a') { "$gac\$name\v4.0_4.0.0.0__$token\$name.dll" }
 
 $refs = @(
-  'System.dll', 'System.Core.dll', 'System.Drawing.dll', 'System.Windows.Forms.dll',
+  'System.dll', 'System.Core.dll', 'System.Drawing.dll', 'System.Windows.Forms.dll', 'System.IO.Compression.dll', 'System.IO.Compression.FileSystem.dll',
   "$wm\Windows.Foundation.winmd", "$wm\Windows.Devices.winmd", "$wm\Windows.Media.winmd", "$wm\Windows.Storage.winmd", "$wm\Windows.Networking.winmd",
   (Facade 'System.Runtime'), (Facade 'System.Threading.Tasks'), (Facade 'System.Runtime.InteropServices.WindowsRuntime')
 ) | ForEach-Object { "/r:$_" }

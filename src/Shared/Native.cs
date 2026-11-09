@@ -51,6 +51,7 @@ namespace TaskbarWidgets
         [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr h);
         [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr ctx);
         [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+        [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, int msg, IntPtr w, IntPtr l);
         [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr h);
         [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
         [DllImport("shell32.dll")] public static extern int SHQueryUserNotificationState(out int state);

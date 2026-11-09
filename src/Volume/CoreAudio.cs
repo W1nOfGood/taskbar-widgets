@@ -148,7 +148,7 @@ namespace TaskbarWidgets.Volume
     internal sealed class AppSession
     {
         public int Pid;
-        public string Name, ExePath, Identifier;
+        public string Name, ExePath, Identifier, InstanceId;
         /// <summary>Stable identity across re-enumerations (same app, same device).</summary>
         public string Key { get { return Identifier ?? ("pid:" + Pid); } }
         public bool System;
@@ -357,6 +357,7 @@ namespace TaskbarWidgets.Volume
                     if (byPid.ContainsKey(pid) && !sys) { Marshal.ReleaseComObject(c); continue; } // one row per app
                     var s = new AppSession { Pid = pid, System = sys, Ctl = c };
                     string sid; if (c.GetSessionIdentifier(out sid) == 0) s.Identifier = sid;
+                    string instId; if (c.GetSessionInstanceIdentifier(out instId) == 0) s.InstanceId = instId;
                     s.Vol = c as ISimpleAudioVolume;
                     s.Meter = c as IAudioMeterInformation;
                     if (s.Vol != null) { s.Vol.GetMasterVolume(out s.Volume); s.Vol.GetMute(out s.Muted); }
@@ -376,16 +377,46 @@ namespace TaskbarWidgets.Volume
             if (s.Ctl != null) { try { Marshal.ReleaseComObject(s.Ctl); } catch { } s.Ctl = null; s.Vol = null; s.Meter = null; }
         }
 
+        static readonly Dictionary<int, string> pathCache = new Dictionary<int, string>();
+
         static void Describe(AppSession s, IAudioSessionControl2 c)
         {
             if (s.System) { s.Name = "System sounds"; return; }
-            s.ExePath = Native.ProcessPath(s.Pid);
+            lock (pathCache)
+            {
+                string cached;
+                if (!pathCache.TryGetValue(s.Pid, out cached))
+                {
+                    if (pathCache.Count > 200) pathCache.Clear();
+                    cached = Native.ProcessPath(s.Pid);
+                    pathCache[s.Pid] = cached;
+                }
+                s.ExePath = cached;
+            }
             string dn; c.GetDisplayName(out dn);
             if (!string.IsNullOrEmpty(dn) && !dn.StartsWith("@")) { s.Name = dn; return; }
             s.Name = AppName(s.ExePath, s.Pid);
         }
 
+        static readonly Dictionary<string, string> nameCache = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
         public static string AppName(string exe, int pid)
+        {
+            if (!string.IsNullOrEmpty(exe))
+            {
+                lock (nameCache)
+                {
+                    string n;
+                    if (nameCache.TryGetValue(exe, out n)) return n;
+                    n = AppNameUncached(exe, pid);
+                    nameCache[exe] = n;
+                    return n;
+                }
+            }
+            return AppNameUncached(exe, pid);
+        }
+
+        static string AppNameUncached(string exe, int pid)
         {
             if (!string.IsNullOrEmpty(exe))
             {

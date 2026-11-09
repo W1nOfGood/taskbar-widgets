@@ -13,6 +13,7 @@ namespace TaskbarWidgets.Battery
         [STAThread]
         static void Main()
         {
+            Updater.WaitForPrevious(Environment.GetCommandLineArgs()); // after an update: let the old instance exit first
             bool fresh;
             using (var mutex = new Mutex(true, "TaskbarWidgets.Battery.SingleInstance", out fresh))
             {
@@ -104,7 +105,9 @@ namespace TaskbarWidgets.Battery
                     if (!S.Bool(lowKey, false))
                     {
                         S.Set(lowKey, true);
-                        if (S.Bool("notify", true)) Notify(d.Name + " battery is low", d.Level + "% remaining. Charge it soon.");
+                        string left = Devices.TimeLeft(d);
+                        if (left != null && left.StartsWith("~")) left = " (" + left.Replace(" (from past use)", "") + ")"; else left = "";
+                        if (S.Bool("notify", true)) Notify(d.Name + " battery is low", d.Level + "% remaining" + left + ". Charge it soon.");
                     }
                 }
                 else if (d.Level >= thr + 10 && S.Bool(lowKey, false)) S.Set(lowKey, false); // charged: re-arm
@@ -290,7 +293,31 @@ namespace TaskbarWidgets.Battery
             }
         }
 
-        protected override void OnWidgetClick(Point p, MouseButtons b) { OpenPanel(-1); }
+        protected override void OnWidgetClick(Point p, MouseButtons b) { tip.Hide(this); tipOn = false; OpenPanel(-1); }
+
+        // hover tooltip: every device with its level and time left
+        readonly ToolTip tip = new ToolTip { InitialDelay = 450, ShowAlways = true };
+        bool tipOn;
+
+        protected override void OnHoverMove()
+        {
+            bool over = Mouse.X >= 0;
+            if (over && !tipOn) { tipOn = true; tip.SetToolTip(this, TipText()); }
+            else if (!over && tipOn) { tipOn = false; tip.Hide(this); }
+        }
+
+        string TipText()
+        {
+            var lines = new List<string>();
+            foreach (var d in OnTaskbar)
+            {
+                string left = Devices.TimeLeft(d);
+                lines.Add(d.Name + ":  " + (d.Level >= 0 ? d.Level + "%" : "–") + (left != null ? "  ·  " + left : ""));
+            }
+            if (lines.Count == 0) lines.Add("No battery devices connected");
+            lines.Add("Click for details");
+            return string.Join("\n", lines);
+        }
 
         protected override void AddMenuItems(ContextMenuStrip m)
         {
@@ -370,9 +397,10 @@ namespace TaskbarWidgets.Battery
             var batt = new RectangleF(r.Right - P(14) - pw - P(40), r.Y + r.Height / 2f - P(7), P(32), P(15));
             int textW = (int)batt.X - tx - P(8);
             ui.DrawText(d.Name, F.BodyBold, dim ? T.Sub : T.Text, new Rectangle(tx, r.Y + P(15), textW, P(20)), TextFormatFlags.EndEllipsis);
+            string eta = bw.Devices.TimeLeft(d), lasts = bw.Devices.FullChargeLasts(d);
             string sub = d.Connected
-                ? "Connected · " + d.Via + (d.Charging ? " · charging" : "")
-                : "Disconnected" + (d.LastLevel >= 0 ? " · last level " + d.LastLevel + "%" : "");
+                ? (eta != null ? eta + " · " : (d.Charging ? "Charging · " : "Connected · ")) + d.Via
+                : "Disconnected" + (d.LastLevel >= 0 ? " · last " + d.LastLevel + "%" : "") + (lasts != null ? " · lasts " + lasts : "");
             if (hidden) sub += " · hidden";
             ui.DrawText(sub, F.Small, T.Faint, new Rectangle(tx, r.Y + P(37), textW, P(18)), TextFormatFlags.EndEllipsis);
             int lvl = d.Connected ? d.Level : d.LastLevel;
@@ -421,6 +449,7 @@ namespace TaskbarWidgets.Battery
             ui.BeginCard();
             ui.Dropdown("Empty widget", null, new[] { "Show an empty battery", "Hide the widget" }, W.S.Int("whenEmpty", 0), v => W.S.Set("whenEmpty", v));
             ui.EndCard();
+            UpdatesSection(ui);
         }
 
         void DesignTab(Ui ui)

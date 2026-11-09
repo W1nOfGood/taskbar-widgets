@@ -58,7 +58,7 @@ namespace TaskbarWidgets.Volume
             if (double.TryParse(S.Get("levelRef2", ""), NumberStyles.Float, CultureInfo.InvariantCulture, out r)) refDb = r;
         }
 
-        public void Start() { refresh.Start(); Refresh(); }
+        public void Start() { refresh.Interval = S.Bool("rememberVol", true) ? 2000 : 4000; refresh.Start(); Refresh(); }
 
         public void Refresh()
         {
@@ -72,6 +72,7 @@ namespace TaskbarWidgets.Volume
                 live = t.Result;
                 Audio.Release(old);
                 RecoverAfterCrash();
+                RememberVolumes();
                 var np = current();
                 var mu = Music;
                 Log.Info("volume", "sessions: " + string.Join(" | ", live.Select(x => x.Name + " [" + Path.GetFileName(x.ExePath ?? "") + "]")) +
@@ -324,6 +325,94 @@ namespace TaskbarWidgets.Volume
 
         /// <summary>Kept for callers: same as <see cref="Release"/>.</summary>
         public void Restore() { Release(); }
+
+        // ---------------------------------------------------------------- per-app volume memory
+
+        Dictionary<string, float> seen = new Dictionary<string, float>(); // session instance -> volume last time we looked
+        readonly Dictionary<string, DateTime> firstSeen = new Dictionary<string, DateTime>();
+        bool primed;
+
+        /// <summary>The app a session belongs to, as a stable settings key (exe name, or the package for store apps).</summary>
+        static string AppKey(AppSession s)
+        {
+            if (s.System) return null;
+            string path = (s.ExePath ?? "").ToLowerInvariant();
+            if (path.Length == 0) return null;
+            int wa = path.IndexOf("\\windowsapps\\");
+            if (wa >= 0)
+            {
+                // store apps: the package name stays the same across updates, the folder doesn't
+                string rest = path.Substring(wa + 13);
+                int us = rest.IndexOf('_');
+                if (us > 0) return "pkg." + rest.Substring(0, us);
+            }
+            return Path.GetFileNameWithoutExtension(path);
+        }
+
+        /// <summary>
+        /// Remembers the volume you give each app and puts it back when the app starts again
+        /// (Windows forgets it often: new versions, device changes, games that reset it...).
+        /// </summary>
+        void RememberVolumes()
+        {
+            if (!S.Bool("rememberVol", true)) { seen.Clear(); primed = false; return; }
+            var now = new Dictionary<string, float>();
+            foreach (var s in live)
+            {
+                string app = AppKey(s);
+                if (app == null || string.IsNullOrEmpty(s.InstanceId) || now.ContainsKey(s.InstanceId)) continue;
+                // for the music app we drive, "its volume" is yours, not our temporary leveling/ducking value
+                float v = s.Key == managedKey ? baseVol : s.LiveVolume();
+                float before;
+                string key = "appvol." + app;
+                if (seen.TryGetValue(s.InstanceId, out before))
+                {
+                    if (Math.Abs(v - before) > 0.01f)
+                    {
+                        DateTime born;
+                        float saved;
+                        bool young = firstSeen.TryGetValue(s.InstanceId, out born) && (DateTime.Now - born).TotalSeconds < 15;
+                        if (young && s.Key != managedKey && float.TryParse(S.Get(key, ""), NumberStyles.Float, CultureInfo.InvariantCulture, out saved) &&
+                            saved >= 0 && saved <= 1 && Math.Abs(saved - v) > 0.01f)
+                        {
+                            // a just-started app reset its own volume (many games do): that's not you, put yours back
+                            s.SetVolume(saved);
+                            Log.Info("volume", "restored " + s.Name + " to " + saved + " (it reset itself)");
+                            v = saved;
+                        }
+                        else S.Set(key, v.ToString("F3", CultureInfo.InvariantCulture)); // you changed it
+                    }
+                }
+                else if (primed)
+                {
+                    // the app (re)started: give it back its remembered volume
+                    float saved;
+                    if (float.TryParse(S.Get(key, ""), NumberStyles.Float, CultureInfo.InvariantCulture, out saved) && saved >= 0 && saved <= 1 &&
+                        Math.Abs(saved - v) > 0.01f && s.Key != managedKey)
+                    {
+                        s.SetVolume(saved);
+                        Log.Info("volume", "restored " + s.Name + " to " + saved);
+                        v = saved;
+                    }
+                    else if (S.Get(key, "") == "") S.Set(key, v.ToString("F3", CultureInfo.InvariantCulture));
+                }
+                else
+                {
+                    // first look after the widget starts: apps already running keep what they have
+                    S.Set(key, v.ToString("F3", CultureInfo.InvariantCulture));
+                }
+                now[s.InstanceId] = v;
+                if (!firstSeen.ContainsKey(s.InstanceId)) firstSeen[s.InstanceId] = primed ? DateTime.Now : DateTime.MinValue;
+            }
+            seen = now;
+            foreach (var gone in firstSeen.Keys.Where(k => !now.ContainsKey(k)).ToList()) firstSeen.Remove(gone);
+            primed = true;
+        }
+
+        public void ForgetVolumes()
+        {
+            foreach (var s in live) { string app = AppKey(s); if (app != null) S.Set("appvol." + app, ""); }
+        }
 
         // ---------------------------------------------------------------- crash safety
 

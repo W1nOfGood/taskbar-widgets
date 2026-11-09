@@ -13,6 +13,7 @@ namespace TaskbarWidgets.Volume
         [STAThread]
         static void Main()
         {
+            Updater.WaitForPrevious(Environment.GetCommandLineArgs()); // after an update: let the old instance exit first
             bool fresh;
             using (var mutex = new Mutex(true, "TaskbarWidgets.Volume.SingleInstance", out fresh))
             {
@@ -634,6 +635,8 @@ namespace TaskbarWidgets.Volume
 
             ui.Section("Apps");
             ui.BeginCard();
+            ui.Toggle("Remember each app's volume", "When an app starts again (a game, Discord, your browser...) it gets back the volume you last gave it.",
+                S.Bool("rememberVol", true), v => { S.Set("rememberVol", v); vw.Apps.Refresh(); });
             if (sessions.Count == 0) ui.Label("No app is using audio on this device right now.", F.Body, T.Sub);
             foreach (var s in sessions)
             {
@@ -697,6 +700,7 @@ namespace TaskbarWidgets.Volume
             ui.Slider("Mouse wheel step", "Scroll over the widget to change the volume.", S.Int("wheelStep", 2), 1, 10, "%", v => S.Set("wheelStep", v));
             ui.Toggle("Middle-click mutes", "Click the mouse wheel on the widget to mute or unmute.", S.Bool("middleMute", true), v => S.Set("middleMute", v));
             ui.EndCard();
+            UpdatesSection(ui);
         }
 
         static int PicModeOf(Settings S) { return S.Bool("showIcon", true) ? S.Int("leftPic", 0) : 2; }

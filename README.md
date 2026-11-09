@@ -39,6 +39,7 @@ Two tiny native widgets that sit side by side, never cover your icons, and use a
 - **Razer** and **Logitech** wireless receivers, **AirPods / Beats**, standard **Bluetooth LE** battery service
 - **Laptop** battery
 - Instant connect/disconnect, **low-battery** and **fully-charged** alerts
+- **Time left** for every device ("~5 h left", "full in ~40 min"), learned from how *you* use it
 - Quiet by design: one low-battery alert per discharge, no popups when a mouse just falls asleep
 - Blink or pulse effect when a device connects
 
@@ -52,11 +53,15 @@ Two tiny native widgets that sit side by side, never cover your icons, and use a
 - **Music ducks while friends talk** in Discord, Teams, Zoom… then fades back
 - **Study mode**: music lowers while a lecture or video plays in your browser, and the course keeps its volume
 - **Song leveling**: every song plays at about the same loudness, even when the app's own Sound Check misses
-- **Per-app volume mixer** with live level meters, **switch output device** in one click
+- **Per-app volume mixer** with live meters, **remembers each app's volume** (games that reset themselves get yours back)
+- **Switch output device** in one click
 
 </td>
 </tr>
 </table>
+
+### 🔄 Always up to date
+- Checks GitHub for a new release once a day and can **install it automatically**: download, SHA-256 check, safe swap with rollback, restart. Both switches are in **General → Updates**.
 
 ### 🧠 Smart about your taskbar
 - **Never covers taskbar icons.** It reads where the Start button, app icons and tray actually are. When space gets tight it shrinks (shorter title, compact battery view) or moves to the next free gap.
@@ -136,6 +141,16 @@ Two tiny native widgets that sit side by side, never cover your icons, and use a
 
 🧪 = built from the public protocol documentation but not yet tested on real hardware. Reports welcome!
 
+### ⏱️ Battery time left
+
+The widget follows each device's discharge and charge runs while it's connected and learns how fast it usually drains and charges. You see:
+
+- **Connected:** "~5 h 20 min left", or "full in ~40 min" while charging (in the panel, the hover tooltip and the low-battery alert)
+- **Not connected:** "full charge lasts ~22 h", from past use
+- **Laptops:** Windows' own estimate
+
+Estimates show up after about 20 minutes of use, or right away once a device has history, and they get more accurate over time.
+
 > [!TIP]
 > **Level looks wrong or stuck?** Many headsets report their battery to Windows only when they connect, so Windows' value can be hours old. Sony headsets are read directly. For other brands, turn the device off and on so it reports again.
 
@@ -213,6 +228,7 @@ flowchart LR
 | `TW_PIN=1` | Keep the panel open when it loses focus |
 | `TW_DEBUG=1` | Save the rendered widget bitmap to `%APPDATA%\TaskbarWidgets` |
 | `TW_DEMO=1` | Fake devices and media (used for the screenshots), with separate settings |
+| `TW_FAKE_VERSION=1.0.0` | Pretend to be an older version to test the updater against the real latest release |
 
 Settings live in `%APPDATA%\TaskbarWidgets\*.ini`, and errors are logged to `*.log` in the same folder.
 </details>
@@ -243,6 +259,12 @@ No. While it adjusts the music app, the widget saves your real volume to disk. C
 <summary><b>I use two monitors</b></summary>
 
 Turn on *Settings → Personalization → Taskbar → Show my taskbar on all displays*, then pick the display in the widget's **General → Display** setting.
+</details>
+
+<details>
+<summary><b>Does it connect to the internet?</b></summary>
+
+Only to check for updates: one request a day to the GitHub API (`api.github.com/repos/W1nOfGood/taskbar-widgets/releases/latest`), plus the download when you install an update. Nothing about you or your devices is sent. Turn it off in **General → Updates → Check for updates**.
 </details>
 
 <details>

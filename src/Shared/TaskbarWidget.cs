@@ -175,6 +175,10 @@ namespace TaskbarWidgets
             tick.Start();
             Render();
             RequestScan();
+            new Updater(this).Start();
+            string updated = Updater.UpdatedTo(Environment.GetCommandLineArgs());
+            if (updated != null)
+                Notify("Taskbar Widgets updated to " + updated, "Click to see what's new.", () => Updater.Instance.OpenPage());
             // Startup touches many pages that are never used again: give them back once settled.
             var trim = new Timer { Interval = 8000 };
             trim.Tick += (o, ev) => { trim.Dispose(); if (Panel == null || !Panel.Visible) Native.TrimMemory(); };
@@ -858,6 +862,7 @@ namespace TaskbarWidgets
                 }
                 Tray.Icon = Icon.FromHandle(bmp.GetHicon());
             }
+            Tray.BalloonTipClicked += (o, e) => { var a = balloonClick; balloonClick = null; if (a != null) a(); };
             Tray.MouseUp += (o, e) =>
             {
                 if (e.Button == MouseButtons.Left) OpenPanel(-1);
@@ -865,9 +870,12 @@ namespace TaskbarWidgets
             };
         }
 
-        public void Notify(string title, string text)
+        Action balloonClick;
+
+        public void Notify(string title, string text, Action onClick = null)
         {
             if (Tray == null) return;
+            balloonClick = onClick;
             bool wasVisible = Tray.Visible;
             Tray.Visible = true;
             Tray.ShowBalloonTip(5000, title, text, ToolTipIcon.None);

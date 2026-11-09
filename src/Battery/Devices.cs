@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -151,6 +152,111 @@ namespace TaskbarWidgets.Battery
             return changed;
         }
 
+        // ---------------------------------------------------------------- time left (learned from your usage)
+
+        sealed class Run { public DateTime T0, TLast; public int L0, LLast; public bool Charging; }
+        readonly Dictionary<string, Run> runs = new Dictionary<string, Run>();
+
+        static bool IsCharging(BatteryDevice d)
+        {
+            return d.Charging || d.Key == "sys" && SystemInformation.PowerStatus.PowerLineStatus == PowerLineStatus.Online;
+        }
+
+        /// <summary>Follows each connected device's discharge / charge runs; a finished run teaches its typical rate.</summary>
+        void TrackAll()
+        {
+            var now = DateTime.Now;
+            foreach (var d in devices.Values)
+            {
+                if (!d.Connected || d.Level < 0 || (d.Via ?? "").Contains("asleep")) continue;
+                bool chg = IsCharging(d);
+                Run r;
+                bool fresh = !runs.TryGetValue(d.Key, out r) || r.Charging != chg || (now - r.TLast).TotalMinutes > 30 ||
+                             (!chg && d.Level > r.LLast + 2) || (chg && d.Level < r.LLast - 2);
+                if (fresh)
+                {
+                    if (r != null) Learn(d.Key, r);
+                    runs[d.Key] = new Run { T0 = now, TLast = now, L0 = d.Level, LLast = d.Level, Charging = chg };
+                }
+                else { r.TLast = now; r.LLast = d.Level; }
+            }
+        }
+
+        void Learn(string key, Run r)
+        {
+            double h = (r.TLast - r.T0).TotalHours;
+            int moved = r.Charging ? r.LLast - r.L0 : r.L0 - r.LLast;
+            if (h < 0.33 || moved < 3) return; // too short to say anything
+            double rate = moved / h;           // % per hour
+            string k = (r.Charging ? "rate.charge." : "rate.drain.") + key;
+            double old = ParseD(S.Get(k, ""));
+            double learned = double.IsNaN(old) ? rate : old + (rate - old) * 0.3;
+            S.Set(k, learned.ToString("F2", CultureInfo.InvariantCulture));
+        }
+
+        static double ParseD(string s)
+        {
+            double v;
+            return double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out v) ? v : double.NaN;
+        }
+
+        /// <summary>% per hour for this device, mixing the current run with what was learned before.</summary>
+        double Rate(BatteryDevice d, bool charging, out bool fromHistory)
+        {
+            fromHistory = false;
+            double cur = double.NaN, h = 0;
+            Run r;
+            if (runs.TryGetValue(d.Key, out r) && r.Charging == charging)
+            {
+                h = (r.TLast - r.T0).TotalHours;
+                int moved = charging ? r.LLast - r.L0 : r.L0 - r.LLast;
+                if (h >= 0.33 && moved >= 2) cur = moved / h;
+            }
+            double learned = ParseD(S.Get((charging ? "rate.charge." : "rate.drain.") + d.Key, ""));
+            if (!double.IsNaN(cur) && !double.IsNaN(learned)) { double w = Math.Min(1, h / 2); return w * cur + (1 - w) * learned; }
+            if (!double.IsNaN(cur)) return cur;
+            fromHistory = !double.IsNaN(learned);
+            return learned;
+        }
+
+        /// <summary>"~5 h 20 min left", "full in ~40 min", or null when there's no estimate yet.</summary>
+        public string TimeLeft(BatteryDevice d)
+        {
+            if (!d.Connected || d.Level < 0) return null;
+            bool chg = IsCharging(d);
+            if (d.Key == "sys" && !chg)
+            {
+                int secs = SystemInformation.PowerStatus.BatteryLifeRemaining; // Windows' own estimate
+                if (secs > 0) return "~" + Fmt(secs / 3600.0) + " left";
+            }
+            if (chg && d.Level >= 100) return "fully charged";
+            bool hist;
+            double rate = Rate(d, chg, out hist);
+            if (double.IsNaN(rate) || rate < 0.05) return null;
+            double hours = chg ? (100 - d.Level) / rate : d.Level / rate;
+            if (hours > 24 * 30) return null;
+            return chg ? "full in ~" + Fmt(hours) : "~" + Fmt(hours) + " left" + (hist ? " (from past use)" : "");
+        }
+
+        /// <summary>How long a full charge usually lasts, learned from past use ("~22 h"), or null.</summary>
+        public string FullChargeLasts(BatteryDevice d)
+        {
+            double learned = ParseD(S.Get("rate.drain." + d.Key, ""));
+            return double.IsNaN(learned) || learned < 0.05 ? null : "~" + Fmt(100 / learned);
+        }
+
+        public static string Fmt(double hours)
+        {
+            if (hours >= 48) return Math.Round(hours / 24) + " days";
+            if (hours >= 10) return Math.Round(hours) + " h";
+            if (hours >= 1)
+            {
+                int m = (int)Math.Round(hours * 6) * 10; // 10-minute steps
+                return m % 60 == 0 ? (m / 60) + " h" : (m / 60) + " h " + (m % 60) + " min";
+            }
+            return Math.Max(5, (int)Math.Round(hours * 12) * 5) + " min";
+        }
+
         public void SetLevel(BatteryDevice d, int level)
         {
             if (level < 0 || level > 100) return;
@@ -172,6 +278,14 @@ namespace TaskbarWidgets.Battery
             add("demo3", "Xbox Controller", Glyph.Gamepad, "Bluetooth LE", true, 14, false);
             add("demo4", "Galaxy Buds2 Pro", Glyph.Earbuds, "Bluetooth", false, 45, false);
             add("demo5", "JBL Flip 6", Glyph.Speaker, "Bluetooth", false, 100, false);
+            // made-up history so the screenshots show time-left estimates
+            var rates = new Dictionary<string, double> { { "demo1", 5.1 }, { "demo2", 3.4 }, { "demo3", 7.5 }, { "demo4", 16 }, { "demo5", 8.4 } };
+            foreach (var kv in rates)
+            {
+                S.Set("rate.drain." + kv.Key, kv.Value.ToString("F2", CultureInfo.InvariantCulture));
+                var d = devices[kv.Key];
+                if (d.Connected) runs[kv.Key] = new Run { T0 = DateTime.Now.AddHours(-2), TLast = DateTime.Now, L0 = d.Level + (int)Math.Round(kv.Value * 2), LLast = d.Level };
+            }
             enumerated = true;
             Raise();
         }
@@ -350,6 +464,7 @@ namespace TaskbarWidgets.Battery
                 if (gattLast.TryGetValue(d.Key.Substring(3), out gl)) SetLevel(d, gl);
             }
             ApplyAirPods();
+            TrackAll();
             if (lg != null)
             {
                 var seen = new HashSet<string>();
