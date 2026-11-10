@@ -20,6 +20,9 @@ namespace TaskbarWidgets.Battery
         public bool Connected, Charging;
         public int Level = -1;      // live level, -1 unknown
         public int LastLevel = -1;  // remembered level for disconnected devices
+        /// <summary>Bluetooth addresses of this device, Bluetooth LE first. Phones use a different address for
+        /// classic Bluetooth and for LE, and Windows ties the two together with one container id.</summary>
+        public List<string> Addrs = new List<string>();
         public int Shown { get { return Connected ? Level : -1; } }
     }
 
@@ -41,7 +44,7 @@ namespace TaskbarWidgets.Battery
         const string AqsBt = "System.Devices.Aep.ProtocolId:=\"{e0cbf06c-cd8b-4647-bb8a-263b43f0f974}\" OR System.Devices.Aep.ProtocolId:=\"{bb7bb05e-5972-42b5-94fc-76eaa7084d49}\"";
         static readonly string[] fullProps = { "System.Devices.Aep.IsConnected", "System.Devices.Aep.IsPaired", "System.Devices.Aep.DeviceAddress",
                                                "System.Devices.Aep.Bluetooth.Cod.Major", "System.Devices.Aep.Bluetooth.Cod.Minor",
-                                               "System.Devices.Aep.Bluetooth.Le.Appearance.Category" };
+                                               "System.Devices.Aep.Bluetooth.Le.Appearance.Category", "System.Devices.Aep.ContainerId" };
         static readonly string[] minProps = { "System.Devices.Aep.IsConnected", "System.Devices.Aep.IsPaired", "System.Devices.Aep.DeviceAddress" };
 
         public DeviceManager(Control ui, Settings s) { this.ui = ui; S = s; }
@@ -295,21 +298,44 @@ namespace TaskbarWidgets.Battery
         void RebuildBluetooth()
         {
             var seen = new HashSet<string>();
-            // A device can appear twice (classic + LE) with the same address: merge before applying.
-            var groups = infos.Values
-                .Where(di => Prop(di, "System.Devices.Aep.IsPaired") is bool && (bool)Prop(di, "System.Devices.Aep.IsPaired"))
-                .GroupBy(di => (Prop(di, "System.Devices.Aep.DeviceAddress") as string ?? "").Replace(":", "").Replace("-", "").ToUpperInvariant());
+            // A device can appear twice (classic + LE): with the same address (headsets), or with two addresses
+            // that Windows ties together with one container id (phones). Merge before applying.
+            Func<DeviceInformation, bool> isLe = di => di.Id.IndexOf("BluetoothLE", StringComparison.OrdinalIgnoreCase) >= 0;
+            // Entries join one group when they share a container id OR an address.
+            var groups = new List<List<DeviceInformation>>();
+            var byTag = new Dictionary<string, List<DeviceInformation>>();
+            foreach (var di in infos.Values.Where(x => Prop(x, "System.Devices.Aep.IsPaired") is bool && (bool)Prop(x, "System.Devices.Aep.IsPaired") && AddrOf(x).Length == 12))
+            {
+                var tags = new List<string> { "a:" + AddrOf(di) };
+                object c = Prop(di, "System.Devices.Aep.ContainerId");
+                if (c is Guid && (Guid)c != Guid.Empty) tags.Add("c:" + c);
+                List<DeviceInformation> g = null;
+                foreach (var t in tags)
+                {
+                    List<DeviceInformation> other;
+                    if (!byTag.TryGetValue(t, out other) || other == g) continue;
+                    if (g == null) { g = other; continue; }
+                    // this entry links two groups: fold the other one into g
+                    g.AddRange(other); groups.Remove(other);
+                    foreach (var k in byTag.Where(kv => kv.Value == other).Select(kv => kv.Key).ToList()) byTag[k] = g;
+                }
+                if (g == null) { g = new List<DeviceInformation>(); groups.Add(g); }
+                g.Add(di);
+                foreach (var t in tags) byTag[t] = g;
+            }
             foreach (var grp in groups)
             {
-                if (grp.Key.Length != 12) continue;
-                string key = "bt:" + grp.Key;
-                var list = grp.ToList();
+                var list = grp.OrderByDescending(isLe).ToList();
+                var addrs = list.Select(AddrOf).Distinct().ToList();
+                // key on the LE address so the level history of the LE entry carries over
+                string key = "bt:" + addrs[0];
                 Func<DeviceInformation, bool> isConn = di => Prop(di, "System.Devices.Aep.IsConnected") is bool && (bool)Prop(di, "System.Devices.Aep.IsConnected");
                 var main = list.FirstOrDefault(isConn) ?? list[0];
                 bool conn = list.Any(isConn);
-                bool le = main.Id.IndexOf("BluetoothLE", StringComparison.OrdinalIgnoreCase) >= 0;
+                bool le = list.Where(isConn).Any(isLe) || (!conn && isLe(main));
                 var d = Get(key, main.Name);
                 d.Name = main.Name;
+                d.Addrs = addrs;
                 d.Via = le ? "Bluetooth LE" : "Bluetooth";
                 d.Kind = Glyph.Generic;
                 foreach (var di in list)
@@ -321,12 +347,25 @@ namespace TaskbarWidgets.Battery
                 bool was = d.Connected;
                 SetConnected(d, conn);
                 if (!was && conn && enumerated) { sonyAt = DateTime.MinValue; ScheduleLevels(); }
-                if (!conn) sonyLast.Remove(grp.Key);
+                if (!conn) foreach (var a in addrs) sonyLast.Remove(a);
                 seen.Add(key);
             }
             foreach (var k in devices.Keys.Where(k => k.StartsWith("bt:") && !seen.Contains(k)).ToList()) devices.Remove(k);
             UpdateAirPodsWatcher();
             Raise();
+        }
+
+        static string AddrOf(DeviceInformation di)
+        {
+            return (Prop(di, "System.Devices.Aep.DeviceAddress") as string ?? "").Replace(":", "").Replace("-", "").ToUpperInvariant();
+        }
+
+        /// <summary>The device's value from a by-address table, trying its LE address first.</summary>
+        static bool Lookup<T>(Dictionary<string, T> table, BatteryDevice d, out T value)
+        {
+            foreach (var a in d.Addrs) if (table.TryGetValue(a, out value)) return true;
+            value = default(T);
+            return false;
         }
 
         static object Prop(DeviceInformation d, string name)
@@ -385,13 +424,13 @@ namespace TaskbarWidgets.Battery
             if (Interlocked.Exchange(ref busy, 1) == 1) { again = true; return; } // run again when the current pass ends
             UpdateSystemBattery();
             // Sony headsets: ask the headset itself (Windows' value is often wrong), at most every 2 minutes
-            var connectedBt = new HashSet<string>(devices.Values.Where(x => x.Connected && x.Key.StartsWith("bt:")).Select(x => x.Key.Substring(3)));
+            var connectedBt = new HashSet<string>(devices.Values.Where(x => x.Connected && x.Key.StartsWith("bt:")).SelectMany(x => x.Addrs));
             bool askSony = S.Bool("sonyDirect", true) && connectedBt.Count > 0 && (DateTime.Now - sonyAt).TotalSeconds > 110;
             if (askSony) sonyAt = DateTime.Now;
             Log.Info("battery", "refresh: connectedBt=" + connectedBt.Count + " askSony=" + askSony);
             // Bluetooth LE devices Windows has no level for: read the standard Battery Service ourselves
-            var needGatt = askSony ? devices.Values.Where(x => x.Connected && x.Key.StartsWith("bt:") && x.Level < 0 && !sonyLast.ContainsKey(x.Key.Substring(3)))
-                                                   .Select(x => x.Key.Substring(3)).ToList() : new List<string>();
+            var needGatt = askSony ? devices.Values.Where(x => x.Connected && x.Key.StartsWith("bt:") && x.Level < 0 && !x.Addrs.Any(sonyLast.ContainsKey))
+                                                   .SelectMany(x => x.Addrs).ToList() : new List<string>();
             Task.Run(() =>
             {
                 Dictionary<string, int> bt = null; List<RazerHid.Result> rz = null; List<LogitechHidpp.Result> lg = null;
@@ -437,10 +476,11 @@ namespace TaskbarWidgets.Battery
                 foreach (var d in devices.Values.Where(x => x.Key.StartsWith("bt:")))
                 {
                     int lv;
-                    if (!bt.TryGetValue(d.Key.Substring(3), out lv)) continue;
+                    // LE first: a phone's LE battery service gives the exact percent, hands-free only steps of 20
+                    if (!Lookup(bt, d, out lv)) continue;
                     // A headset we read directly before: Windows' value for it is known to be wrong, so show
                     // the last real reading until the headset answers again.
-                    if (d.Connected && S.Bool("direct." + d.Key, false) && !sonyLast.ContainsKey(d.Key.Substring(3)))
+                    if (d.Connected && S.Bool("direct." + d.Key, false) && !d.Addrs.Any(sonyLast.ContainsKey))
                     {
                         if (d.LastLevel >= 0) d.Level = d.LastLevel;
                         continue;
@@ -452,7 +492,7 @@ namespace TaskbarWidgets.Battery
             foreach (var d in devices.Values.Where(x => x.Key.StartsWith("bt:") && x.Connected))
             {
                 SonyBattery.Result sr;
-                if (!sonyLast.TryGetValue(d.Key.Substring(3), out sr)) continue;
+                if (!Lookup(sonyLast, d, out sr)) continue;
                 SetLevel(d, sr.Level);
                 d.Charging = sr.Charging;
                 S.Set("direct." + d.Key, true);
@@ -461,7 +501,7 @@ namespace TaskbarWidgets.Battery
             foreach (var d in devices.Values.Where(x => x.Key.StartsWith("bt:") && x.Connected && x.Level < 0))
             {
                 int gl;
-                if (gattLast.TryGetValue(d.Key.Substring(3), out gl)) SetLevel(d, gl);
+                if (Lookup(gattLast, d, out gl)) SetLevel(d, gl);
             }
             ApplyAirPods();
             TrackAll();
