@@ -19,6 +19,8 @@ namespace TaskbarWidgets.Volume
         public TimeSpan Position, Duration;
         public DateTime PositionAt;
         public Bitmap Art, AppIcon;
+        internal string ArtKey; // fingerprint of the picture's bytes
+        internal int PropsSeq;  // newer reads win over slower older ones
 
         public TimeSpan LivePosition
         {
@@ -197,26 +199,43 @@ namespace TaskbarWidgets.Volume
         async void LoadProps(GlobalSystemMediaTransportControlsSession s)
         {
             var np = Find(s); if (np == null) return;
+            int seq = ++np.PropsSeq;
             try
             {
                 var p = await Rt.Await(s.TryGetMediaPropertiesAsync());
-                if (p == null) return;
+                if (p == null || seq != np.PropsSeq) return;
                 bool trackChanged = np.Title != p.Title || np.Artist != p.Artist;
                 np.Title = p.Title; np.Artist = p.Artist; np.Album = p.AlbumTitle;
                 if (string.IsNullOrEmpty(np.Artist) && !string.IsNullOrEmpty(p.AlbumArtist)) np.Artist = p.AlbumArtist;
                 Raise();
-                if (trackChanged || np.Art == null)
+                // The picture is compared by its bytes, not by the title: Apple Music and others send the new
+                // title first and swap the picture a moment later, sometimes without another event.
+                byte[] bytes = p.Thumbnail == null ? null : await ReadBytes(p.Thumbnail);
+                if (seq != np.PropsSeq) return;
+                string key = bytes == null ? null : ArtKeyOf(bytes);
+                if (key != np.ArtKey || (np.Art == null && bytes != null))
                 {
-                    var art = p.Thumbnail == null ? null : await ReadImage(p.Thumbnail);
+                    var art = bytes == null ? null : Decode(bytes);
                     if (np.Art != null) np.Art.Dispose();
-                    np.Art = art;
+                    np.Art = art; np.ArtKey = art == null ? null : key;
                     Raise();
                 }
+                if (trackChanged)
+                    foreach (int ms in new[] { 1500, 4000 })
+                    {
+                        var later = Task.Delay(ms).ContinueWith(t => Post(() => { if (Find(s) == np) LoadProps(s); }));
+                    }
             }
             catch (Exception ex) { Log.Write("media", ex); }
         }
 
-        static async Task<Bitmap> ReadImage(IRandomAccessStreamReference r)
+        static string ArtKeyOf(byte[] bytes)
+        {
+            using (var md5 = System.Security.Cryptography.MD5.Create())
+                return Convert.ToBase64String(md5.ComputeHash(bytes));
+        }
+
+        static async Task<byte[]> ReadBytes(IRandomAccessStreamReference r)
         {
             try
             {
@@ -229,22 +248,31 @@ namespace TaskbarWidgets.Volume
                         uint got = await Rt.Await(reader.LoadAsync(size));
                         var bytes = new byte[got];
                         reader.ReadBytes(bytes);
-                        using (var ms = new MemoryStream(bytes))
-                        using (var img = Image.FromStream(ms))
-                        {
-                            // keep a small copy only: the panel shows it at ~120 px
-                            int side = 160;
-                            var b = new Bitmap(side, side);
-                            using (var g = Graphics.FromImage(b))
-                            {
-                                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
-                                float sc = Math.Max(side / (float)img.Width, side / (float)img.Height);
-                                float w = img.Width * sc, h = img.Height * sc;
-                                g.DrawImage(img, (side - w) / 2, (side - h) / 2, w, h);
-                            }
-                            return b;
-                        }
+                        return bytes;
                     }
+                }
+            }
+            catch { return null; }
+        }
+
+        static Bitmap Decode(byte[] bytes)
+        {
+            try
+            {
+                using (var ms = new MemoryStream(bytes))
+                using (var img = Image.FromStream(ms))
+                {
+                    // keep a small copy only: the panel shows it at ~120 px
+                    int side = 160;
+                    var b = new Bitmap(side, side);
+                    using (var g = Graphics.FromImage(b))
+                    {
+                        g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                        float sc = Math.Max(side / (float)img.Width, side / (float)img.Height);
+                        float w = img.Width * sc, h = img.Height * sc;
+                        g.DrawImage(img, (side - w) / 2, (side - h) / 2, w, h);
+                    }
+                    return b;
                 }
             }
             catch { return null; }
