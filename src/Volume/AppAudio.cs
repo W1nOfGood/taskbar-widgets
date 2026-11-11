@@ -75,7 +75,8 @@ namespace TaskbarWidgets.Volume
                 RememberVolumes();
                 var np = current();
                 var mu = Music;
-                Log.Info("volume", "sessions: " + string.Join(" | ", live.Select(x => x.Name + " [" + Path.GetFileName(x.ExePath ?? "") + "]")) +
+                Log.Info("volume", "sessions: " + string.Join(" | ", live.Select(x => x.Name + " [" + Path.GetFileName(x.ExePath ?? "") + "] peak " +
+                                                    x.LivePeak().ToString("F3", CultureInfo.InvariantCulture) + " vol " + x.LiveVolume().ToString("F2", CultureInfo.InvariantCulture))) +
                          " || media app=" + (np == null ? "-" : np.AppId) + " -> music=" + (mu == null ? "none" : mu.Name) +
                          " || voice=" + string.Join(",", Voice.Select(x => x.Name)) + " || video=" + string.Join(",", Videos.Select(x => x.Name)));
                 bool need = mu != null && (LevelMode > 0 || S.Bool("duck", true) && Voice.Count > 0 || S.Bool("duckVideo", true) && Videos.Count > 0) || managedKey != null;
@@ -127,7 +128,14 @@ namespace TaskbarWidgets.Volume
             {
                 var np = current();
                 if (np == null) return null;
-                return live.FirstOrDefault(s => Matches(s, np.AppId));
+                var mine = live.Where(s => Matches(s, np.AppId)).ToList();
+                if (mine.Count <= 1) return mine.FirstOrDefault();
+                // the app has more than one process with sound (Apple Music: the app and its player): take the one
+                // that is playing, and stay with the one we drive unless another one is clearly the one playing
+                var cur = mine.FirstOrDefault(s => s.Key == managedKey);
+                var loud = mine.OrderByDescending(s => s.LivePeak()).First();
+                if (cur != null && (cur.LivePeak() > 0.004f || loud.LivePeak() <= 0.004f)) return cur;
+                return loud.LivePeak() > 0.004f ? loud : mine[0];
             }
         }
 

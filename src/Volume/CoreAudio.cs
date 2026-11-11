@@ -157,13 +157,70 @@ namespace TaskbarWidgets.Volume
         internal ISimpleAudioVolume Vol;
         internal IAudioMeterInformation Meter;
         internal IAudioSessionControl2 Ctl;
+        /// <summary>The app's other sessions on this device. Some apps (Apple Music's player) open two and play
+        /// through either one, so every change goes to all of them and the meter reads the loudest.</summary>
+        internal List<IAudioSessionControl2> More = new List<IAudioSessionControl2>();
 
         static readonly Guid ctx = Guid.Empty;
-        public void SetVolume(float v) { Guid g = ctx; if (Vol != null) Vol.SetMasterVolume(Math.Max(0, Math.Min(1, v)), ref g); Volume = v; }
-        public void SetMute(bool m) { Guid g = ctx; if (Vol != null) Vol.SetMute(m, ref g); Muted = m; }
-        public float LiveVolume() { float v = Volume; try { if (Vol != null) Vol.GetMasterVolume(out v); } catch { } return v; }
-        public bool LiveMuted() { bool m = Muted; try { if (Vol != null) Vol.GetMute(out m); } catch { } return m; }
-        public float LivePeak() { float p = 0; try { if (Meter != null) Meter.GetPeakValue(out p); } catch { } return p; }
+
+        IEnumerable<IAudioSessionControl2> All()
+        {
+            if (Ctl != null) yield return Ctl;
+            foreach (var c in More) yield return c;
+        }
+
+        public void SetVolume(float v)
+        {
+            v = Math.Max(0, Math.Min(1, v));
+            foreach (var c in All()) { var sv = c as ISimpleAudioVolume; Guid g = ctx; try { if (sv != null) sv.SetMasterVolume(v, ref g); } catch { } }
+            Volume = v;
+        }
+
+        public void SetMute(bool m)
+        {
+            foreach (var c in All()) { var sv = c as ISimpleAudioVolume; Guid g = ctx; try { if (sv != null) sv.SetMute(m, ref g); } catch { } }
+            Muted = m;
+        }
+
+        /// <summary>The volume of the session that is playing (the first one when none is).</summary>
+        public float LiveVolume()
+        {
+            float v = Volume;
+            try
+            {
+                var sv = Loudest() as ISimpleAudioVolume;
+                if (sv != null) sv.GetMasterVolume(out v);
+            }
+            catch { }
+            return v;
+        }
+
+        public bool LiveMuted()
+        {
+            bool m = Muted;
+            try { var sv = Loudest() as ISimpleAudioVolume; if (sv != null) sv.GetMute(out m); } catch { }
+            return m;
+        }
+
+        public float LivePeak()
+        {
+            float best = 0;
+            foreach (var c in All()) { float p = 0; var mt = c as IAudioMeterInformation; try { if (mt != null) mt.GetPeakValue(out p); } catch { } best = Math.Max(best, p); }
+            return best;
+        }
+
+        IAudioSessionControl2 Loudest()
+        {
+            if (More.Count == 0) return Ctl;
+            IAudioSessionControl2 best = Ctl; float bp = -1;
+            foreach (var c in All())
+            {
+                float p = 0; var mt = c as IAudioMeterInformation;
+                try { if (mt != null) mt.GetPeakValue(out p); } catch { }
+                if (p > bp + 0.001f) { bp = p; best = c; }
+            }
+            return best;
+        }
     }
 
     /// <summary>Master volume, output devices and per-app sessions. All calls on the UI thread (STA).</summary>
@@ -332,7 +389,7 @@ namespace TaskbarWidgets.Volume
 
         public static void UpdatePeaks(List<AppSession> list)
         {
-            foreach (var s in list) { float p = 0; try { if (s.Meter != null) s.Meter.GetPeakValue(out p); } catch { } s.Peak = p; }
+            foreach (var s in list) s.Peak = s.LivePeak();
         }
 
         static List<AppSession> SessionsOf(IMMDevice device)
@@ -354,7 +411,8 @@ namespace TaskbarWidgets.Volume
                     if (state == 2 /*expired*/) { Marshal.ReleaseComObject(c); continue; }
                     int pid; c.GetProcessId(out pid);
                     bool sys = c.IsSystemSoundsSession() == 0;
-                    if (byPid.ContainsKey(pid) && !sys) { Marshal.ReleaseComObject(c); continue; } // one row per app
+                    AppSession same;
+                    if (!sys && byPid.TryGetValue(pid, out same)) { same.More.Add(c); continue; } // one row per app, all its sessions
                     var s = new AppSession { Pid = pid, System = sys, Ctl = c };
                     string sid; if (c.GetSessionIdentifier(out sid) == 0) s.Identifier = sid;
                     string instId; if (c.GetSessionInstanceIdentifier(out instId) == 0) s.InstanceId = instId;
@@ -368,6 +426,8 @@ namespace TaskbarWidgets.Volume
                 Marshal.ReleaseComObject(e);
             }
             Marshal.ReleaseComObject(mgr);
+            // apps with several sessions: show the one that is playing
+            foreach (var s in sessions) if (s.More.Count > 0) { s.Volume = s.LiveVolume(); s.Muted = s.LiveMuted(); }
             sessions.Sort((a, b) => a.System != b.System ? (a.System ? 1 : -1) : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
             return sessions;
         }
@@ -375,6 +435,8 @@ namespace TaskbarWidgets.Volume
         static void ReleaseSession(AppSession s)
         {
             if (s.Ctl != null) { try { Marshal.ReleaseComObject(s.Ctl); } catch { } s.Ctl = null; s.Vol = null; s.Meter = null; }
+            foreach (var c in s.More) { try { Marshal.ReleaseComObject(c); } catch { } }
+            s.More.Clear();
         }
 
         static readonly Dictionary<int, string> pathCache = new Dictionary<int, string>();
