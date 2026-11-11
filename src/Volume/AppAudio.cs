@@ -211,13 +211,23 @@ namespace TaskbarWidgets.Volume
             // --- ducking target
             float peak = 0;
             foreach (var v in voice) peak = Math.Max(peak, v.LivePeak());
-            if (peak > 0.02f && playing) lastTalk = DateTime.Now;
+            // the music can leak into the voice app (audio routed through a virtual cable, your own stream...):
+            // take out the part that is just the music, or the music would lower itself in a loop
+            float musicOut = playing ? music.LivePeak() * music.LiveVolume() : 0; // the meter reads before the app volume
+            if (Talking(peak, Echo(peak, musicOut) * musicOut) && playing) lastTalk = DateTime.Now;
             float vpeak = 0;
             foreach (var v in videos) vpeak = Math.Max(vpeak, v.LivePeak());
             if (vpeak > 0.015f && playing) lastVideo = DateTime.Now;
-            bool duck = (DateTime.Now - lastTalk).TotalMilliseconds < 1300 || (DateTime.Now - lastVideo).TotalMilliseconds < 4000;
+            bool duck = (DateTime.Now - lastTalk).TotalMilliseconds < 1500 || (DateTime.Now - lastVideo).TotalMilliseconds < 4000;
             float amount = Math.Max(0.1f, Math.Min(0.95f, S.Int("duckAmount", 60) / 100f));
             float duckTarget = duck ? 1f - amount : 1f;
+            if (duck != wasDucking)
+            {
+                wasDucking = duck;
+                Log.Info("volume", string.Format(CultureInfo.InvariantCulture, "duck {0}: voice peak {1:F3} (floor {2:F3}, talk {3:F1} s ago) video peak {4:F3} [{5}] (video {6:F1} s ago)",
+                    duck ? "ON" : "off", peak, voiceFloor, (DateTime.Now - lastTalk).TotalSeconds, vpeak,
+                    string.Join(",", videos.Select(x => x.Name)), (DateTime.Now - lastVideo).TotalSeconds));
+            }
 
             // nothing to do at all: stay out of the way
             if (managedKey == null && LevelMode == 0 && duckTarget >= 1f) return;
@@ -242,6 +252,47 @@ namespace TaskbarWidgets.Volume
 
             // fully back to the user's volume and nothing else to do: hand the volume back
             if (LevelMode == 0 && duckFactor >= 1f && Math.Abs(levelDb) < 0.05) Release();
+        }
+
+        // ---- voice detection: open mics send hiss, clicks and bumps all the time, which must not lower the music
+        bool wasDucking;
+        readonly float[] echoRatios = new float[100]; // voice level ÷ music level, last 10 s of music
+        int echoN, echoIdx;
+        float echo;                                   // how much of the music shows up in the voice app (0 = none)
+
+        /// <summary>
+        /// Learns how much of the music leaks into the voice app. The voice level is compared with the music's
+        /// output; a low percentile of the ratio over 10 s is the leak, because an echo is there all the time and
+        /// talking is not. Without a leak the ratio is only the call's hiss, so it stays near 0.
+        /// </summary>
+        float Echo(float voicePeak, float musicOut)
+        {
+            if (musicOut < 0.01f) return echo; // music too quiet to tell
+            echoRatios[echoIdx] = Math.Min(2f, voicePeak / musicOut);
+            echoIdx = (echoIdx + 1) % echoRatios.Length;
+            if (echoN < echoRatios.Length) echoN++;
+            if (echoN < 20) return echo; // 2 s of music first
+            var sorted = echoRatios.Take(echoN).OrderBy(x => x).ToArray();
+            float was = echo;
+            echo = sorted[echoN / 5]; // 20th percentile
+            if (Math.Abs(echo - was) > 0.1f) Log.Info("volume", string.Format(CultureInfo.InvariantCulture, "music echo in voice app: {0:F2}", echo));
+            return echo;
+        }
+        float voiceFloor = 0.01f;                    // background level of the call, learned
+        readonly bool[] voiceHits = new bool[8];     // last 800 ms: above the speech threshold?
+        int voiceIdx;
+
+        /// <summary>Someone is talking: after taking out the echo of the music, sound clearly above the call's
+        /// background in at least 4 of the last 8 readings (about half a second). Clicks, bumps, an open mic's
+        /// hiss and your own music coming back don't count.</summary>
+        bool Talking(float peak, float echoLevel)
+        {
+            float rest = Math.Max(0f, peak - echoLevel * 1.1f); // what is left after taking out the music's echo
+            // the floor follows quiet moments down at once and creeps up slowly, so constant hiss becomes the floor
+            voiceFloor = rest < voiceFloor ? rest : voiceFloor + (rest - voiceFloor) * 0.002f;
+            voiceHits[voiceIdx] = rest > Math.Max(0.025f, voiceFloor * 3);
+            voiceIdx = (voiceIdx + 1) % voiceHits.Length;
+            return voiceHits.Count(h => h) >= 4;
         }
 
         void UpdateLevel(AppSession music, NowPlaying np, bool playing)
